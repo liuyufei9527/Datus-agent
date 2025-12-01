@@ -63,6 +63,7 @@ class Node(ABC):
             CompareNode,
             DateParserNode,
             DocSearchNode,
+            EvalNode,
             ExecuteSQLNode,
             FixNode,
             GenerateSQLNode,
@@ -106,6 +107,8 @@ class Node(ABC):
             return SelectionNode(node_id, description, node_type, input_data, agent_config, tools)
         elif node_type == NodeType.TYPE_SUBWORKFLOW:
             return SubworkflowNode(node_id, description, node_type, input_data, agent_config, tools)
+        elif node_type == NodeType.TYPE_EVAL:
+            return EvalNode(node_id, description, node_type, input_data, agent_config)
         elif node_type == NodeType.TYPE_COMPARE:
             return CompareNode(node_id, description, node_type, input_data, agent_config, tools)
         elif node_type == NodeType.TYPE_DATE_PARSER:

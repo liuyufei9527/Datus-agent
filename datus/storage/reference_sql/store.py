@@ -282,7 +282,7 @@ class ReferenceSqlRAG:
         search_results = self.reference_sql_storage.search(
             query_text,
             top_n=top_n,
-            where=where_condition,
+            #where=where_condition,
         )
 
         if search_results:

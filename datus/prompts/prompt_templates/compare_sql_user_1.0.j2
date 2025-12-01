@@ -7,6 +7,16 @@ SQL Task: {{ sql_task }}
 External Knowledge (Important, Please Consider): {{ external_knowledge }}
 {% endif %}
 
+Table Schemas:
+{{ processed_schemas }}
+Data Details:
+{{ processed_details }}
+
+Current knowledge tree:
+```yaml
+{{ knowledge_tree }}
+```
+
 Current SQL Query:
 ```sql
 {{ sql_query }}

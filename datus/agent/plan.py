@@ -13,7 +13,7 @@ from datus.agent.node import Node
 from datus.agent.workflow import Workflow
 from datus.configuration.agent_config import AgentConfig
 from datus.configuration.node_type import NodeType
-from datus.schemas.node_models import SqlTask
+from datus.schemas.node_models import SqlTask, TableSchema, TableValue
 from datus.schemas.schema_linking_node_models import SchemaLinkingInput
 from datus.utils.loggings import get_logger
 
@@ -253,21 +253,76 @@ def generate_workflow(
     for node in nodes:
         workflow.add_node(node)
     if task.tables and agent_config is not None:
-        from datus.storage.schema_metadata import SchemaWithValueRAG
+        from datus.tools.db_tools.db_manager import db_manager_instance
 
         try:
-            rag = SchemaWithValueRAG(agent_config=agent_config)
-            schemas, values = rag.search_tables(
-                task.tables, task.catalog_name, task.database_name, task.schema_name, dialect=task.database_type
+            # Get database connector
+            connector = db_manager_instance(agent_config.namespaces).get_conn(
+                agent_config.current_namespace,
+                task.database_name
             )
+
+            # Use connector to precisely retrieve table DDL definitions
+            ddl_results = connector.get_tables_with_ddl(
+                catalog_name=task.catalog_name,
+                database_name=task.database_name,
+                schema_name=task.schema_name,
+                tables=task.tables
+            )
+
+            # Convert to TableSchema object list
+            schemas = [
+                TableSchema(
+                    identifier=item["identifier"],
+                    catalog_name=item["catalog_name"],
+                    database_name=item["database_name"],
+                    schema_name=item["schema_name"],
+                    table_name=item["table_name"],
+                    definition=item["definition"],
+                    table_type=item.get("table_type", "table")
+                )
+                for item in ddl_results
+            ]
+
+            # Retrieve sample data
+            sample_results = connector.get_sample_rows(
+                tables=task.tables,
+                catalog_name=task.catalog_name,
+                database_name=task.database_name,
+                schema_name=task.schema_name,
+                top_n=5
+            )
+
+            # Convert to TableValue object list
+            values = [
+                TableValue(
+                    identifier=connector.identifier(
+                        catalog_name=item["catalog_name"],
+                        database_name=item["database_name"],
+                        schema_name=item["schema_name"],
+                        table_name=item["table_name"]
+                    ),
+                    catalog_name=item["catalog_name"],
+                    database_name=item["database_name"],
+                    schema_name=item["schema_name"],
+                    table_name=item["table_name"],
+                    table_values=item["sample_rows"],
+                    table_type="table"
+                )
+                for item in sample_results
+            ]
+
+            # Validate the number of tables retrieved
             if len(schemas) != len(task.tables):
                 schema_table_names = [item.table_name for item in schemas]
                 logger.warning(
                     f"The obtained table schema is: {schema_table_names}; "
-                    f"The table required for the task is: {schemas}"
+                    f"The table required for the task is: {task.tables}"
                 )
+
             logger.debug(f"Use task tables: {schemas}")
             workflow.context.update_schema_and_values(schemas, values)
+
         except Exception as e:
             logger.warning(f"Failed to obtain the schema corresponding to {task.tables}: {e}")
 

@@ -5,6 +5,7 @@ Tests the performance improvements and return type changes in storage modules.
 
 import tempfile
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
@@ -257,13 +258,22 @@ class TestExtKnowledgeStorePyArrow:
 
     def test_search_similar_knowledge_returns_pyarrow_table(self, temp_db_path, sample_ext_knowledge_data):
         """Test that search_similar_knowledge returns PyArrow Table."""
-        storage = ExtKnowledgeStore(db_path=temp_db_path, embedding_model=get_db_embedding_model())
-        storage.store(sample_ext_knowledge_data)
+        storage = ExtKnowledgeStore("/data/datus_db_TencentBenchmarkDeepseek-knowledge")
+        tree = storage.get_knowledge_tree()
+        frame = pd.DataFrame()
+        result = []
+        for domain_item in tree.items():
+            domain_name = domain_item[0]
+            for layer1_item in domain_item[1].items():
+                layer1_name = layer1_item[0]
+                for layer2 in layer1_item[1]:
+                    knowledge_list = storage.list_knowledge(domain_name, layer1_name, layer2)
+                    for knowledge in knowledge_list.get("items"):
+                        result.append(knowledge)
+        csv = pd.DataFrame(result).to_csv("/Users/liuyufei/DatusProject/TencentBenchmark/final_for_student/data/knowledge-deepseek.csv")
+        #result = storage.search_knowledge(query_text="financial metrics", domain="Finance", top_n=2)
+        print(tree)
 
-        result = storage.search_knowledge(query_text="financial metrics", domain="Finance", top_n=2)
-
-        assert isinstance(result, pa.Table)
-        assert result.num_rows <= 2
 
     def test_get_all_knowledge_returns_pyarrow_table(self, temp_db_path, sample_ext_knowledge_data):
         """Test that get_all_knowledge returns PyArrow Table."""

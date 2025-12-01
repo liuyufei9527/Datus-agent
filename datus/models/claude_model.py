@@ -212,7 +212,7 @@ class ClaudeModel(LLMBaseModel):
 
         # Only add temperature if top_p is not specified
         if "top_p" not in kwargs:
-            params["temperature"] = kwargs.get("temperature", 0.7)
+            params["temperature"] = kwargs.get("temperature", self.model_config.temperature)
 
         # Add any remaining kwargs, but ensure temperature is removed when top_p is present
         kw_copy = dict(kwargs)

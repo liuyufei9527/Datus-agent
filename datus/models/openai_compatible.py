@@ -249,7 +249,7 @@ class OpenAICompatibleModel(LLMBaseModel):
                 params["temperature"] = kwargs["temperature"]
             elif not hasattr(self, "_uses_completion_tokens_parameter") or not self._uses_completion_tokens_parameter():
                 # Add default temperature only for non-reasoning models
-                params["temperature"] = 0.7
+                params["temperature"] = self.model_config.temperature
 
             if "top_p" in kwargs:
                 params["top_p"] = kwargs["top_p"]

@@ -1319,6 +1319,7 @@ class EvaluationReportBuilder:
 
             if analysis.output_failure > 0 or analysis.errors:
                 failed_task_ids.add(task_id)
+                empty_result_task_ids.add(task_id)
 
             for comparison in evaluation.comparisons:
                 outcome = comparison.outcome
@@ -1328,7 +1329,7 @@ class EvaluationReportBuilder:
                 total_comparisons += 1
 
                 if outcome.error:
-                    if "No columns to parse from file" in outcome.error:
+                    if "Actual result unavailable" in outcome.error:
                         empty_result_count += 1
                         empty_result_task_ids.add(task_id)
                     else:
@@ -1872,17 +1873,15 @@ def _build_gold_result_provider(
     )
 
 
-def evaluate_benchmark(
+def build_benchmark_evaluator(
     agent_config: AgentConfig,
     benchmark_platform: str,
     target_task_ids: Optional[Iterable[str]] = None,
-) -> Dict[str, Any]:
+) -> tuple[BenchmarkEvaluator,Iterable[str]]:
     result_directory = Path(agent_config.output_dir)
     if not result_directory.exists():
         logger.warning(f"Result directory not found at {result_directory}")
         return {}
-
-    trajectory_directory = Path(agent_config.trajectory_dir)
 
     try:
         benchmark_config = agent_config.benchmark_config(benchmark_platform)
@@ -1933,8 +1932,18 @@ def evaluate_benchmark(
         result_sql_provider=result_sql_provider,
         gold_sql_provider=gold_sql_provider,
     )
+    return evaluator,target_task_ids
 
-    report = evaluator.evaluate_directory(str(trajectory_directory), target_task_ids)
+def evaluate_benchmark(
+    agent_config: AgentConfig,
+    benchmark_platform: str,
+    target_task_ids: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    evaluator, actual_task_ids = build_benchmark_evaluator(
+        agent_config=agent_config,
+        benchmark_platform=benchmark_platform,
+        target_task_ids=target_task_ids,)
+    report = evaluator.evaluate_directory(agent_config.trajectory_dir, actual_task_ids)
     return report.to_dict()
 
 

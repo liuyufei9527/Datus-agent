@@ -3,7 +3,7 @@
 # See http://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 
@@ -42,7 +42,7 @@ class ExtKnowledgeStore(BaseEmbeddingStore):
                     pa.field("vector", pa.list_(pa.float32(), list_size=embedding_model.dim_size)),
                 ]
             ),
-            vector_source_name="explanation",
+            vector_source_name="terminology",
         )
 
     def create_indices(self):
@@ -192,6 +192,107 @@ class ExtKnowledgeStore(BaseEmbeddingStore):
             unique_layers.add((result["layer1"], result["layer2"]))
 
         return [{"layer1": layer1, "layer2": layer2} for layer1, layer2 in unique_layers]
+
+    def get_knowledge_tree(self) -> Dict[str, Dict[str, List[str]]]:
+        self._ensure_table_ready()
+        tree: Dict[str, Dict[str, List[str]]] = {}
+        # Step 1: get all domains
+        domains = self.get_domains()
+        # Step 2: get layer1/layer2 combinations for each domain
+        for domain in domains:
+            layers = self.get_layers_by_domain(domain)
+            # Initialize domain node
+            if domain not in tree:
+                tree[domain] = {}
+            # Fill layer1 → list(layer2)
+            for entry in layers:
+                layer1 = entry["layer1"]
+                layer2 = entry["layer2"]
+                if layer1 not in tree[domain]:
+                    tree[domain][layer1] = []
+                if layer2 not in tree[domain][layer1]:
+                    tree[domain][layer1].append(layer2)
+        return tree
+
+    def get_knowledge_size(self) -> int:
+        """Get the total number of knowledge entries."""
+        try:
+            self._ensure_table_ready()
+            return self.table.count_rows()
+        except Exception:
+            return 0
+
+    def list_knowledge(
+        self,
+        domain: str = "",
+        layer1: str = "",
+        layer2: str = "",
+        offset: int = 0,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """List knowledge entries with pagination support.
+
+        Args:
+            domain: Filter by domain (optional)
+            layer1: Filter by layer1 (optional)
+            layer2: Filter by layer2 (optional)
+            offset: Number of entries to skip (default 0)
+            limit: Maximum number of entries to return (default 10)
+
+        Returns:
+            Dict containing:
+                - items: List of knowledge entries
+                - total: Total number of matching entries
+                - offset: Current offset
+                - limit: Current limit
+        """
+        # Ensure table is ready before direct table access
+        self._ensure_table_ready()
+
+        conditions = []
+        if domain:
+            conditions.append(eq("domain", domain))
+        if layer1:
+            conditions.append(eq("layer1", layer1))
+        if layer2:
+            conditions.append(eq("layer2", layer2))
+
+        if not conditions:
+            where_condition = None
+        elif len(conditions) == 1:
+            where_condition = conditions[0]
+        else:
+            where_condition = and_(*conditions)
+
+        where_clause = build_where(where_condition)
+
+        # Get total count
+        total = self.table.count_rows(where_clause) if where_clause else self.table.count_rows()
+
+        # Build query with pagination
+        query_builder = self.table.search()
+        if where_clause:
+            query_builder = query_builder.where(where_clause)
+
+        query_builder = query_builder.select(["domain", "layer1", "layer2", "terminology", "explanation", "created_at"])
+
+        # Apply pagination using offset + limit
+        results = query_builder.limit(offset + limit).to_arrow()
+
+        # Slice to get only the page we want
+        if offset > 0:
+            results = results.slice(offset, min(limit, len(results) - offset))
+        else:
+            results = results.slice(0, min(limit, len(results)))
+
+        items = results.to_pylist()
+
+        return {
+            "items": items,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
 
     def after_init(self):
         """After initialization, create indices for the table."""

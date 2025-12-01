@@ -40,3 +40,8 @@ workflow:
     - chatbot
     - execute_sql
     - output
+
+  # Evaluation workflow with knowledge generation
+  eval_compare:
+    - eval         # Load gold data, compare results
+    - compare      # Generate knowledge from comparison

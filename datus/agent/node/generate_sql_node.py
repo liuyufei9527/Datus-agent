@@ -1,9 +1,11 @@
 # Copyright 2025-present DatusAI, Inc.
 # Licensed under the Apache License, Version 2.0.
 # See http://www.apache.org/licenses/LICENSE-2.0 for details.
+import asyncio
 import json
 from typing import AsyncGenerator, Dict, List, Optional, Tuple
 
+import yaml
 from agents import Tool
 
 from datus.agent.node import Node
@@ -13,8 +15,11 @@ from datus.models.base import LLMBaseModel
 from datus.prompts.gen_sql import get_sql_prompt
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.schemas.node_models import GenerateSQLInput, GenerateSQLResult, SQLContext, SqlTask, TableSchema, TableValue
+from datus.storage import ExtKnowledgeStore
 from datus.storage.schema_metadata import SchemaWithValueRAG
+from datus.tools.func_tool import ContextSearchTools, trans_to_function_tool
 from datus.utils.constants import DBType
+from datus.utils.json_utils import llm_result2json
 from datus.utils.loggings import get_logger
 from datus.utils.time_utils import get_default_current_date
 from datus.utils.traceable_utils import optional_traceable
@@ -34,6 +39,8 @@ class GenerateSQLNode(Node):
     ):
         super().__init__(node_id, description, node_type, input_data, agent_config, tools)
         self._metadata_rag: SchemaWithValueRAG | None = None
+        self._search_tools = ContextSearchTools(agent_config)
+        self._tools = [trans_to_function_tool(self._search_tools.list_knowledge)]
 
     @property
     def metadata_rag(self) -> SchemaWithValueRAG:
@@ -120,7 +127,12 @@ class GenerateSQLNode(Node):
 
         try:
             logger.debug(f"Generate SQL input: {type(self.input)} {self.input}")
-            return generate_sql(self.model, self.input)
+            storage_path = self.agent_config.rag_storage_path()
+            self.ext_knowledge_store = ExtKnowledgeStore(storage_path)
+            knowledge_tree = self.ext_knowledge_store.get_knowledge_tree()
+            knowledge_tree_yaml = yaml.dump(knowledge_tree, allow_unicode=True, sort_keys=True,
+                                            default_flow_style=False, indent=2)
+            return generate_sql(self.model, self.input, self._tools, knowledge_tree_yaml)
         except Exception as e:
             logger.error(f"SQL generation execution error: {str(e)}")
             return GenerateSQLResult(success=False, error=str(e), sql_query="", tables=[], explanation=None)
@@ -236,7 +248,7 @@ class GenerateSQLNode(Node):
 
 
 @optional_traceable()
-def generate_sql(model: LLMBaseModel, input_data: GenerateSQLInput) -> GenerateSQLResult:
+def generate_sql(model: LLMBaseModel, input_data: GenerateSQLInput, tools: List[Tool], knowledge_tree: str) -> GenerateSQLResult:
     """Generate SQL query using the provided model."""
     if not isinstance(input_data, GenerateSQLInput):
         raise TypeError("Input data must be a GenerateSQLInput instance")
@@ -244,7 +256,7 @@ def generate_sql(model: LLMBaseModel, input_data: GenerateSQLInput) -> GenerateS
     sql_query = ""
     try:
         # Format the prompt with schema list
-        prompt = get_sql_prompt(
+        sys, user = get_sql_prompt(
             database_type=input_data.database_type or DBType.SQLITE.value,
             table_schemas=input_data.table_schemas,
             data_details=input_data.data_details,
@@ -261,29 +273,30 @@ def generate_sql(model: LLMBaseModel, input_data: GenerateSQLInput) -> GenerateS
             database_docs=input_data.database_docs,
             current_date=get_default_current_date(input_data.sql_task.current_date),
             date_ranges=getattr(input_data.sql_task, "date_ranges", ""),
+            knowledge_tree=knowledge_tree
         )
 
-        logger.debug(f"Generated SQL prompt:  {type(model)}, {prompt}")
+        #logger.debug(f"Generated SQL prompt:  {type(model)}, {prompt}")
         # Generate SQL using the provided model
-        sql_query = model.generate_with_json_output(prompt)
+        sql_query = asyncio.run(model.generate_with_tools(
+            prompt=user,
+            mcp_servers={},
+            instruction=sys,
+            tools=tools,
+            # if model is OpenAI, json_schema output is supported, use ReasoningSQLResponse
+            output_type=str,
+            max_turns=50, ))
         logger.debug(f"Generated SQL: {sql_query}")
 
         # Clean and parse the response
-        if isinstance(sql_query, str):
+        if isinstance(sql_query["content"], str):
             # Remove markdown code blocks if present
-            sql_query = sql_query.strip().replace("```json\n", "").replace("\n```", "")
-            # Remove SQL comments
-            cleaned_lines = []
-            for line in sql_query.split("\n"):
-                line = line.strip()
-                if line and not line.startswith("--"):
-                    cleaned_lines.append(line)
-            cleaned_sql = " ".join(cleaned_lines)
-            try:
-                sql_query_dict = json.loads(cleaned_sql)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse cleaned SQL: {cleaned_sql}")
-                return GenerateSQLResult(success=False, error="Invalid JSON format", sql_query=sql_query)
+            sql_query_dict = llm_result2json(sql_query["content"])
+            # try:
+            #     sql_query_dict = json.loads(cleaned_json)
+            # except json.JSONDecodeError:
+            #     logger.error(f"Failed to parse cleaned SQL: {cleaned_json}")
+            #     return GenerateSQLResult(success=False, error="Invalid JSON format", sql_query=sql_query)
         else:
             sql_query_dict = sql_query
 

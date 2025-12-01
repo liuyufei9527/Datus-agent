@@ -31,7 +31,8 @@ def get_sql_prompt(
     database_docs: str = "",
     current_date: str = None,
     date_ranges: str = "",
-) -> List[Dict[str, str]]:
+    knowledge_tree: str = ""
+) -> tuple[str, str]:
     if context is None:
         context = []
 
@@ -84,6 +85,7 @@ def get_sql_prompt(
         database_type=database_type,
         database_notes=database_notes,
         processed_schemas=processed_schemas,
+        knowledge_tree=knowledge_tree,
         processed_details=processed_details,
         metrics=processed_metrics,
         knowledge_content=knowledge_content,
@@ -95,7 +97,4 @@ def get_sql_prompt(
         date_ranges=date_ranges,
     )
 
-    return [
-        {"role": "system", "content": system_content},
-        {"role": "user", "content": user_content},
-    ]
+    return system_content, user_content

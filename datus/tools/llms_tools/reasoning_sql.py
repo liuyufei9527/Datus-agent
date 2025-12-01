@@ -162,6 +162,7 @@ def reasoning_sql_with_mcp(
         max_value_length=input_data.max_value_length,
         max_text_mark_length=input_data.max_text_mark_length,
         knowledge_content=input_data.external_knowledge,
+        knowledge_tree=input_data.knowledge_tree,
     )
     try:
         exec_result = asyncio.run(

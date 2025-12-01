@@ -75,6 +75,7 @@ def get_reasoning_prompt(
     max_value_length: int = 500,
     max_text_mark_length: int = 16,
     knowledge_content: str = "",
+    knowledge_tree: str = "",
 ) -> List[Dict[str, str]]:
     if isinstance(table_schemas, str):
         processed_schemas = table_schemas
@@ -125,6 +126,7 @@ def get_reasoning_prompt(
         processed_context=processed_context,
         version=prompt_version,
         knowledge_content=knowledge_content,
+        knowledge_tree=knowledge_tree
     )
 
     return [

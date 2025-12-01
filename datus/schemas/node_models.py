@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datus.schemas.base import TABLE_TYPE, BaseInput, BaseResult
 from datus.schemas.doc_search_node_models import DocSearchResult
+from datus.schemas.eval_node_models import EvalResult
 from datus.utils.constants import DBType
 from datus.utils.loggings import get_logger
 
@@ -50,6 +51,8 @@ class SqlTask(BaseModel):
     layer1: str = Field(default="", description="Layer1 name")
     layer2: str = Field(default="", description="Layer2 name")
     domain: str = Field(default="", description="domain name")
+
+    benchmark_platform: str = Field(default="", description="Benchmark platform name")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value by key with an optional default value."""
@@ -114,6 +117,9 @@ class TableSchema(BaseTableSchema):
         """
 
         schema_text = " ".join(self.definition.split())
+        schema_text = re.sub(r"varchar\(\d+\)", "varchar", schema_text, flags=re.IGNORECASE)
+        schema_text = re.sub(r"bigint\(\d+\)", "varchar", schema_text, flags=re.IGNORECASE)
+        schema_text = re.sub(r" null ", " ", schema_text, flags=re.IGNORECASE)
         # TODO: improve the schema compact for all databases
         return schema_text.replace("VARCHAR(16777216)", "VARCHAR")
 
@@ -362,10 +368,10 @@ class GenerateSQLInput(BaseInput):
     contexts: Optional[List[SQLContext]] = Field(default=[], description="Optional context information for the input")
     external_knowledge: str = Field(default="", description="External knowledge for the input")
     prompt_version: str = Field(default="1.0", description="Version for prompt")
-    max_table_schemas_length: int = Field(default=4000, description="Max table schemas length")
-    max_data_details_length: int = Field(default=2000, description="Max data details length")
-    max_context_length: int = Field(default=8000, description="Max context length")
-    max_value_length: int = Field(default=500, description="Max value length")
+    max_table_schemas_length: int = Field(default=10000, description="Max table schemas length")
+    max_data_details_length: int = Field(default=10000, description="Max data details length")
+    max_context_length: int = Field(default=20000, description="Max context length")
+    max_value_length: int = Field(default=5000, description="Max value length")
     max_text_mark_length: int = Field(default=16, description="Max text mark length")
     database_docs: Optional[str] = Field(default="", description="Database documentation")
 
@@ -507,6 +513,7 @@ class Context(BaseModel):
         default=None, description="The last selected result from selection node"
     )
     selection_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadata about selection process")
+    eval_result: Optional[EvalResult] = Field(default=None, description="Evaluation result")
 
     def update_schema_and_values(self, table_schemas: List[TableSchema], table_values: List[TableValue]):
         """

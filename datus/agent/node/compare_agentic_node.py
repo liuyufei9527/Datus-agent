@@ -2,6 +2,8 @@
 
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from json_repair import json_repair
+
 from datus.agent.node.agentic_node import AgenticNode
 from datus.configuration.agent_config import AgentConfig
 from datus.prompts.prompt_manager import prompt_manager
@@ -9,7 +11,7 @@ from datus.schemas.action_history import ActionHistory, ActionHistoryManager, Ac
 from datus.schemas.compare_node_models import CompareInput, CompareResult
 from datus.tools.db_tools.db_manager import db_manager_instance
 from datus.tools.func_tool import DBFuncTool
-from datus.utils.json_utils import llm_result2json
+from datus.utils.json_utils import llm_result2json, strip_json_str
 from datus.utils.loggings import get_logger
 from datus.utils.traceable_utils import optional_traceable
 
@@ -124,8 +126,11 @@ class CompareAgenticNode(AgenticNode):
             "compare_sql_user",
             database_type=input_data.sql_task.database_type,
             database_name=input_data.sql_task.database_name,
+            processed_schemas=input_data.processed_schemas,
+            processed_values=input_data.processed_values,
             sql_task=input_data.sql_task.task,
             external_knowledge=input_data.sql_task.external_knowledge,
+            knowledge_tree=input_data.knowledge_tree,
             sql_query=sql_query,
             sql_explanation=sql_explanation,
             sql_result=sql_result,
@@ -142,31 +147,28 @@ class CompareAgenticNode(AgenticNode):
         return system_instruction, user_prompt, messages
 
     @staticmethod
-    def _parse_comparison_output(raw_output: Any) -> Dict[str, str]:
+    def _parse_comparison_output(raw_output: Any) -> List[Dict[str, str]]:
         """
-        Convert model output into a dictionary with explanation and suggestions.
+        Convert model output into a dictionary with explanation, suggestions, and knowledge.
         """
-        if isinstance(raw_output, dict):
-            return raw_output
-
-        if raw_output is None:
-            return {}
-
-        if isinstance(raw_output, str):
-            result = llm_result2json(raw_output, expected_type=dict)
+        if isinstance(raw_output["content"], str):
+            cleaned_string = strip_json_str(raw_output["content"])
+            if not cleaned_string:
+                return {}
+            result = json_repair.loads(cleaned_string)
             if result is None:
                 snippet = (
                     (raw_output[:300] + "...") if isinstance(raw_output, str) and len(raw_output) > 300 else raw_output
                 )
                 logger.warning(f"Failed to parse comparison output as JSON. Raw: {snippet}")
-                return {
-                    "explanation": f"Failed to parse comparison output as JSON. Raw: {snippet}",
-                    "suggest": "Please verify the response format manually.",
-                }
+                return []
+            # Ensure knowledge field exists
+            if len(result) == 0:
+                result = []
             return result
 
         logger.debug(f"Unexpected comparison output type: {type(raw_output)}")
-        return {}
+        return []
 
     @optional_traceable()
     async def execute_stream(
@@ -274,6 +276,7 @@ class CompareAgenticNode(AgenticNode):
                 explanation=result_dict.get("explanation", "No explanation provided"),
                 suggest=result_dict.get("suggest", "No suggestions provided"),
                 tokens_used=tokens_used,
+                knowledge=result_dict.get("knowledge", {}),
             )
 
             action_history_manager.update_action_by_id(

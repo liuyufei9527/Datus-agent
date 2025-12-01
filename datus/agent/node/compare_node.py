@@ -1,9 +1,11 @@
 # Copyright 2025-present DatusAI, Inc.
 # Licensed under the Apache License, Version 2.0.
 # See http://www.apache.org/licenses/LICENSE-2.0 for details.
-
+import asyncio
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Optional
+
+import yaml
 
 from datus.agent.node import Node
 from datus.agent.node.compare_agentic_node import CompareAgenticNode
@@ -11,6 +13,7 @@ from datus.agent.workflow import Workflow
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.schemas.compare_node_models import CompareInput, CompareResult
 from datus.schemas.node_models import SQLContext
+from datus.storage import ExtKnowledgeStore
 from datus.utils.exceptions import DatusException, ErrorCode
 from datus.utils.loggings import get_logger
 from datus.utils.traceable_utils import optional_traceable
@@ -31,14 +34,49 @@ class CompareNode(Node):
             yield action
 
     def setup_input(self, workflow: Workflow) -> Dict:
-        # Use the expectation from input_data if provided, otherwise empty string
-        expectation = self.input if isinstance(self.input, str) and self.input.strip() else ""
+        """Setup input, using gold SQL from EvalNode if available."""
 
-        next_input = CompareInput(
-            sql_task=workflow.task,
-            sql_context=workflow.get_last_sqlcontext(),
-            expectation=expectation,
-        )
+        # Priority 1: Use gold SQL from EvalNode if available
+        expectation = ""
+        processed_schemas = "\n".join(schema.to_prompt() for schema in workflow.context.table_schemas)
+        value_list = []
+        for table_value in workflow.context.table_values:
+            value_list.append(table_value.to_prompt(max_value_length=1000, processed_schemas=processed_schemas))
+        processed_values = "\n".join(value_list)
+
+        if hasattr(workflow.context, 'eval_result') and workflow.context.eval_result:
+            storage_path = self.agent_config.rag_storage_path()
+            self.ext_knowledge_store = ExtKnowledgeStore(storage_path)
+            knowledge_tree = self.ext_knowledge_store.get_knowledge_tree()
+            if len(knowledge_tree) > 0:
+                knowledge_tree_yaml = yaml.dump(knowledge_tree, allow_unicode=True, sort_keys=True,
+                                                default_flow_style=False, indent=2)
+            else:
+                knowledge_tree_yaml = ""
+            eval_result = workflow.context.eval_result
+            if eval_result.actual_sql and eval_result.actual_result:
+                sql_context = SQLContext(sql_query=eval_result.actual_sql, sql_return=eval_result.actual_result)
+            else:
+                sql_context = SQLContext(sql_query="", sql_return="")
+            next_input = CompareInput(
+                sql_task=workflow.task,
+                sql_context=sql_context,
+                expectation=f"SQL:\n{eval_result.gold_sql};\nRESULT DATA:\n{eval_result.gold_result}",
+                knowledge_tree=knowledge_tree_yaml,
+                processed_schemas=processed_schemas,
+                processed_values=processed_values,
+            )
+            self.workflow = workflow
+        else:
+            # Priority 2: Fallback to direct input (existing behavior)
+            if not expectation:
+                expectation = self.input if isinstance(self.input, str) and self.input.strip() else ""
+
+            next_input = CompareInput(
+                sql_task=workflow.task,
+                sql_context=workflow.get_last_sqlcontext(),
+                expectation=expectation,
+            )
         self.input = next_input
         return {"success": True, "message": "Compare input setup complete", "suggestions": [next_input]}
 
@@ -68,16 +106,34 @@ class CompareNode(Node):
             raise DatusException(ErrorCode.COMMON_VALIDATION_FAILED, "Model is not initialized for CompareAgenticNode")
 
         try:
-            _, _, messages = CompareAgenticNode._prepare_prompt_components(self.input)
+            system, user, messages = CompareAgenticNode._prepare_prompt_components(self.input)
             logger.debug("CompareAgenticNode executing with prompt messages: %s", messages)
 
-            raw_result = self.model.generate_with_json_output(messages)
-            result_dict = CompareAgenticNode._parse_comparison_output(raw_result)
-
+            raw_result = asyncio.run(self.model.generate_with_tools(
+                prompt=user,
+                mcp_servers={},
+                instruction=system,
+                tools=self.workflow.tools,
+                # if model is OpenAI, json_schema output is supported, use ReasoningSQLResponse
+                output_type=str,
+                max_turns=50, ))
+            knowledge_list = CompareAgenticNode._parse_comparison_output(raw_result)
+            #if hasattr(self, "ext_knowledge_store"):
+            for knowledge in knowledge_list:
+                knowledge_data = {
+                    "domain": knowledge.get("domain"),
+                    "layer1": knowledge.get("layer1"),
+                    "layer2": knowledge.get("layer2"),
+                    "terminology": knowledge.get("keyword"),
+                    "explanation": knowledge.get("description"),
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                self.ext_knowledge_store.store_batch([knowledge_data])
             return CompareResult(
                 success=True,
-                explanation=result_dict.get("explanation", "No explanation provided"),
-                suggest=result_dict.get("suggest", "No suggestions provided"),
+                explanation="",
+                suggest="",
+                #knowledge=result_dict.get("knowledge", {}),
             )
         except Exception as exc:
             logger.error(f"CompareAgenticNode synchronous execution failed: {exc}")

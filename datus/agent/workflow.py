@@ -9,6 +9,7 @@ from datus.configuration.agent_config import AgentConfig
 from datus.schemas.node_models import Context, SQLContext, SqlTask
 from datus.utils.exceptions import DatusException, ErrorCode
 from datus.utils.loggings import get_logger
+from ..tools.func_tool import ContextSearchTools, trans_to_function_tool
 
 if TYPE_CHECKING:
     from .node import Node
@@ -519,3 +520,7 @@ class Workflow:
         from datus.tools.func_tool import db_function_tools
 
         self.tools = db_function_tools(self._global_config, self.task.database_name)
+        #self.tools = []
+        search_tools = ContextSearchTools(self._global_config)
+        self.tools.append(trans_to_function_tool(search_tools.list_knowledge))
+

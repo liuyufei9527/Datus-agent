@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         help="Explicit task ids to benchmark and evaluate (space/comma separated)",
     )
     parser.add_argument("--max_workers", type=int, default=1, help="Concurrent workers for benchmark execution.")
+    parser.add_argument(
+        "--plan-mode",
+        action="store_true",
+        help="Enable plan mode for benchmark execution (generates plan then auto-executes without confirmation)",
+    )
     return parser.parse_args()
 
 
@@ -121,6 +126,7 @@ def build_agent_args(
         "workflow": cli_args.workflow,
         "output_file": str(evaluation_file),
         "max_workers": cli_args.max_workers,
+        "plan_mode": cli_args.plan_mode,
     }
     return argparse.Namespace(**common_kwargs)
 

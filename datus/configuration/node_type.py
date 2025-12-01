@@ -10,6 +10,7 @@ from datus.schemas.chat_agentic_node_models import ChatNodeInput
 from datus.schemas.compare_node_models import CompareInput
 from datus.schemas.date_parser_node_models import DateParserInput
 from datus.schemas.doc_search_node_models import DocSearchInput
+from datus.schemas.eval_node_models import EvalInput
 from datus.schemas.fix_node_models import FixInput
 from datus.schemas.gen_sql_agentic_node_models import GenSQLNodeInput
 from datus.schemas.node_models import ExecuteSQLInput, GenerateSQLInput, OutputInput, ReflectionInput
@@ -44,6 +45,7 @@ class NodeType:
     TYPE_DOC_SEARCH = "doc_search"  # For document search
     TYPE_FIX = "fix"  # For fixing the SQL query
     TYPE_SEARCH_METRICS = "search_metrics"  # For search metrics
+    TYPE_EVAL = "eval"  # For evaluating SQL results against gold standard
     TYPE_COMPARE = "compare"  # For comparing SQL with expectations
     TYPE_DATE_PARSER = "date_parser"  # For parsing temporal expressions
 
@@ -62,6 +64,7 @@ class NodeType:
         TYPE_DOC_SEARCH,
         TYPE_FIX,
         TYPE_SEARCH_METRICS,
+        TYPE_EVAL,
         TYPE_COMPARE,
         TYPE_DATE_PARSER,
         TYPE_CHAT,
@@ -85,6 +88,7 @@ class NodeType:
         TYPE_PARALLEL: "Execute child nodes in parallel",
         TYPE_SELECTION: "Select best result from multiple candidates",
         TYPE_SUBWORKFLOW: "Execute a nested workflow",
+        TYPE_EVAL: "Evaluate SQL results against gold standard",
         TYPE_COMPARE: "Compare SQL with expectations",
         TYPE_DATE_PARSER: "Parse temporal expressions in queries",
         TYPE_CHAT: "Conversational AI interactions with tool calling",
@@ -124,6 +128,8 @@ class NodeType:
             input_data_cls = SelectionInput
         elif node_type == NodeType.TYPE_SUBWORKFLOW:
             input_data_cls = SubworkflowInput
+        elif node_type == NodeType.TYPE_EVAL:
+            input_data_cls = EvalInput
         elif node_type == NodeType.TYPE_COMPARE:
             input_data_cls = CompareInput
         elif node_type == NodeType.TYPE_DATE_PARSER:

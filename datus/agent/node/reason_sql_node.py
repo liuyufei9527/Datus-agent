@@ -5,11 +5,14 @@
 from datetime import datetime
 from typing import AsyncGenerator, Dict, Optional
 
+import yaml
+
 from datus.agent.node import Node
 from datus.agent.workflow import Workflow
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.schemas.node_models import SQLContext
 from datus.schemas.reason_sql_node_models import ReasoningInput, ReasoningResult
+from datus.storage import ExtKnowledgeStore
 from datus.tools.llms_tools.reasoning_sql import reasoning_sql_with_mcp, reasoning_sql_with_mcp_stream
 from datus.utils.loggings import get_logger
 
@@ -36,6 +39,11 @@ class ReasonSQLNode(Node):
             yield action
 
     def setup_input(self, workflow: Workflow) -> Dict:
+        storage_path = self.agent_config.rag_storage_path()
+        self.ext_knowledge_store = ExtKnowledgeStore(storage_path)
+        knowledge_tree = self.ext_knowledge_store.get_knowledge_tree()
+        knowledge_tree_yaml = yaml.dump(knowledge_tree, allow_unicode=True, sort_keys=True,
+                                        default_flow_style=False, indent=2)
         next_input = ReasoningInput(
             database_type=workflow.task.database_type,
             sql_task=workflow.task,
@@ -44,6 +52,7 @@ class ReasonSQLNode(Node):
             metrics=workflow.context.metrics,
             external_knowledge=workflow.task.external_knowledge,
             contexts=workflow.context.sql_contexts[-1:] if workflow.context.sql_contexts else [],
+            knowledge_tree=knowledge_tree_yaml,
         )
         self.input = next_input
         logger.info(f"Setup reasoning input: {self.input}")

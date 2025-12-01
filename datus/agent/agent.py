@@ -517,6 +517,7 @@ class Agent:
                     if not benchmark_config.ext_knowledge_key
                     else task_item.get(benchmark_config.ext_knowledge_key, ""),
                     schema_linking_type="full",
+                    benchmark_platform=benchmark_platform,
                 ),
                 check_storage=False,
                 check_db=False,
