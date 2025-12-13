@@ -703,7 +703,7 @@ class OpenAICompatibleModel(LLMBaseModel):
                                         output={},
                                         status=ActionStatus.PROCESSING,
                                     )
-                                    action_history_manager.add_action(thinking_action)
+                                    action_history_manager.add_action(start_action)
                                     logger.debug(
                                         f"Stored tool call: {tool_name} "
                                         f"(call_id={call_id[:20] if call_id else 'None'}...)"
