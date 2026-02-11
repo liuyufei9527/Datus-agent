@@ -416,7 +416,7 @@ class ChatAgenticNode(GenSQLAgenticNode):
             self.plan_hooks = PlanModeHooks(broker=broker, session=session, auto_mode=auto_mode)
 
         # Create initial action
-        action_type = "plan_mode_interaction" if is_plan_mode else "chat_interaction"
+        action_type = "plan_mode_interactiodn" if is_plan_mode else "chat_interaction"
         action = ActionHistory.create_action(
             role=ActionRole.USER,
             action_type=action_type,
