@@ -80,29 +80,15 @@ If any `conftest.py` was changed, use `git diff <MERGE_BASE>..HEAD -- <conftest_
 
 ### Phase 2: COVERAGE CHECK — Run Related Tests with Coverage
 
-Run all discovered test files with coverage measurement using `--brief` for compact JSON output. Only include test files that actually exist on disk:
+Run all discovered test files with coverage measurement. Only include test files that actually exist on disk:
 
 ```bash
-python3 ci/run-tests-and-coverage.py <BASE_BRANCH> --test-paths <test_file_1> <test_file_2> ... --brief
+python3 ci/run-tests-and-coverage.py <BASE_BRANCH> --test-paths <test_file_1> <test_file_2> ...
 ```
 
-The `--brief` flag suppresses pytest streaming logs but prints:
-1. **Test results** — pass/fail counts, failure tracebacks (for debugging)
-2. **Coverage** — overall and diff percentages, uncovered lines when < 80%
-3. **JSON_SUMMARY block** — structured JSON for easy parsing:
-```json
-{
-  "test_outcome": "success",
-  "test_total": 10, "test_passed": 9, "test_failed": 1, "test_skipped": 0,
-  "overall_coverage": "85.00", "diff_coverage": "72.50",
-  "failures": [{"test": "classname::test_name", "message": "..."}],
-  "violation_lines": {"datus/utils/foo.py": [10, 15, 23]}
-}
-```
-- `failures` — only present when tests fail
-- `violation_lines` — only present when `diff_coverage` < 80
-
-Use the JSON_SUMMARY block for decision-making. Read failure tracebacks above it when fixing tests.
+Parse results:
+1. Read `ci/test-report.md` for test pass/fail details.
+2. Read `ci/diff-cover.json`, extract `total_percent_covered`.
 
 **Decision**:
 - **All tests pass AND `total_percent_covered` >= 80** → Go to Phase 5 (report success).
