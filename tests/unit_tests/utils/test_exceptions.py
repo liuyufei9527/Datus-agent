@@ -1,16 +1,18 @@
 """
+Tests for datus/utils/exceptions.py.
 Integration tests for SQLAlchemy connector exception handling.
 Tests real database scenarios with SQLite.
 """
 
 import os
+import sys
 import tempfile
 
 import pytest
 
 from datus.tools.db_tools import SQLiteConnector
 from datus.tools.db_tools.config import SQLiteConfig
-from datus.utils.exceptions import DatusException, ErrorCode
+from datus.utils.exceptions import DatusException, ErrorCode, setup_exception_handler
 
 
 class TestIntegrationExceptions:
@@ -165,3 +167,163 @@ class TestIntegrationExceptions:
         # Delete non-existent record (should succeed but return 0 rows)
         res = connector.execute_delete("DELETE FROM test_delete WHERE id = 999")
         assert res.row_count == 0
+
+
+# ===========================================================================
+# Unit tests for ErrorCode and DatusException
+# ===========================================================================
+
+
+class TestErrorCode:
+    def test_code_attribute(self):
+        assert ErrorCode.COMMON_UNKNOWN.code == "1000000"
+
+    def test_desc_attribute(self):
+        assert "Unknown error" in ErrorCode.COMMON_UNKNOWN.desc
+
+    def test_field_invalid_has_template(self):
+        assert "{field_name}" in ErrorCode.COMMON_FIELD_INVALID.desc
+
+    def test_all_codes_have_str_code(self):
+        for ec in ErrorCode:
+            assert isinstance(ec.code, str)
+            assert isinstance(ec.desc, str)
+
+
+class TestDatusException:
+    def test_basic_exception(self):
+        ex = DatusException(ErrorCode.COMMON_UNKNOWN)
+        assert "1000000" in str(ex)
+        assert "Unknown error" in str(ex)
+
+    def test_custom_message(self):
+        ex = DatusException(ErrorCode.COMMON_UNKNOWN, message="Custom error msg")
+        assert "Custom error msg" in str(ex)
+        assert "1000000" in str(ex)
+
+    def test_message_args(self):
+        ex = DatusException(
+            ErrorCode.COMMON_FIELD_INVALID,
+            message_args={"field_name": "age", "except_values": "1-100", "your_value": "abc"},
+        )
+        assert "age" in str(ex)
+        assert "abc" in str(ex)
+
+    def test_is_exception(self):
+        ex = DatusException(ErrorCode.COMMON_UNKNOWN)
+        assert isinstance(ex, Exception)
+
+    def test_build_msg_no_args_no_message(self):
+        ex = DatusException(ErrorCode.COMMON_UNKNOWN)
+        assert ex.message == f"error_code=1000000, error_message={ErrorCode.COMMON_UNKNOWN.desc}"
+
+    def test_str_representation(self):
+        ex = DatusException(ErrorCode.COMMON_UNKNOWN, message="test msg")
+        assert str(ex) == ex.message
+
+    def test_raises_and_catches(self):
+        with pytest.raises(DatusException):
+            raise DatusException(ErrorCode.DB_FAILED, message_args={"error_message": "connection lost"})
+
+
+class TestSetupExceptionHandler:
+    def test_sets_excepthook(self):
+        original_hook = sys.excepthook
+        try:
+            setup_exception_handler()
+            assert sys.excepthook != original_hook
+        finally:
+            sys.excepthook = original_hook
+
+    def test_handler_with_console_logger(self, tmp_path):
+        original_hook = sys.excepthook
+        try:
+            from datus.utils.loggings import configure_logging
+
+            configure_logging(log_dir=str(tmp_path / "logs"))
+
+            console_log_calls = []
+
+            def mock_console_logger(msg):
+                console_log_calls.append(msg)
+
+            setup_exception_handler(console_logger=mock_console_logger)
+
+            try:
+                raise DatusException(ErrorCode.COMMON_UNKNOWN, message="handler test")
+            except DatusException:
+                exc_type, exc_val, exc_tb = sys.exc_info()
+                sys.excepthook(exc_type, exc_val, exc_tb)
+
+            assert len(console_log_calls) > 0
+            assert "handler test" in console_log_calls[0]
+        finally:
+            sys.excepthook = original_hook
+
+    def test_handler_with_regular_exception(self, tmp_path):
+        original_hook = sys.excepthook
+        try:
+            from datus.utils.loggings import configure_logging
+
+            configure_logging(log_dir=str(tmp_path / "logs"))
+
+            console_log_calls = []
+
+            def mock_console_logger(msg):
+                console_log_calls.append(msg)
+
+            setup_exception_handler(console_logger=mock_console_logger)
+
+            try:
+                raise ValueError("regular error")
+            except ValueError:
+                exc_type, exc_val, exc_tb = sys.exc_info()
+                sys.excepthook(exc_type, exc_val, exc_tb)
+
+            assert len(console_log_calls) > 0
+        finally:
+            sys.excepthook = original_hook
+
+    def test_handler_with_prefix_wrap_func(self, tmp_path):
+        original_hook = sys.excepthook
+        try:
+            from datus.utils.loggings import configure_logging
+
+            configure_logging(log_dir=str(tmp_path / "logs"))
+
+            console_log_calls = []
+
+            def mock_console_logger(msg):
+                console_log_calls.append(msg)
+
+            def prefix_wrapper(prefix):
+                return f"[WRAPPED]{prefix}"
+
+            setup_exception_handler(console_logger=mock_console_logger, prefix_wrap_func=prefix_wrapper)
+
+            try:
+                raise ValueError("wrap test")
+            except ValueError:
+                exc_type, exc_val, exc_tb = sys.exc_info()
+                sys.excepthook(exc_type, exc_val, exc_tb)
+
+            assert len(console_log_calls) > 0
+            assert "[WRAPPED]" in console_log_calls[0]
+        finally:
+            sys.excepthook = original_hook
+
+    def test_handler_no_console_logger(self, tmp_path):
+        original_hook = sys.excepthook
+        try:
+            from datus.utils.loggings import configure_logging
+
+            configure_logging(log_dir=str(tmp_path / "logs"))
+            setup_exception_handler()
+
+            try:
+                raise ValueError("no console test")
+            except ValueError:
+                exc_type, exc_val, exc_tb = sys.exc_info()
+                sys.excepthook(exc_type, exc_val, exc_tb)
+        finally:
+            sys.excepthook = original_hook
