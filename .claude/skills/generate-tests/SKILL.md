@@ -30,19 +30,22 @@ Set `BASE_BRANCH` = `$ARGUMENTS` (if empty, `ci/run-tests-and-coverage.py` auto-
 
 #### Step 1.1: Identify all changed files
 
+First get the merge base commit (run as a separate, simple command):
 ```bash
-MERGE_BASE=$(git merge-base HEAD origin/${BASE_BRANCH:-main})
-git diff ${MERGE_BASE}..HEAD --name-only
+git merge-base HEAD origin/${BASE_BRANCH:-main}
 ```
 
-Categorize into:
-- **Changed source files**: paths matching `datus/**/*.py` (exclude `datus/prompts/prompt_templates/*`)
-- **Changed/new test files**: paths matching `tests/**/*.py`
+Save the output as `MERGE_BASE`. Then get changed source files:
+```bash
+git diff <MERGE_BASE>..HEAD --name-only -- 'datus/**/*.py'
+```
+
+Filter out `datus/prompts/prompt_templates/*` from the results.
 
 #### Step 1.2: Collect newly added/modified test files (ALWAYS included)
 
 ```bash
-git diff ${MERGE_BASE}..HEAD --name-only -- 'tests/**/*.py'
+git diff <MERGE_BASE>..HEAD --name-only -- 'tests/**/*.py'
 ```
 
 These test files are **always included** in the final test set, tagged as `[NEW]`.
@@ -53,21 +56,17 @@ For each changed source file, check if a corresponding test file exists on disk:
 
 **File mapping rule**: `datus/a/b/c.py` → `tests/unit_tests/a/b/test_c.py`
 
-If the mapped test file exists, add it to the test set, tagged as `[MAPPED]`.
+Use `ls` or the Glob tool to check existence. If the mapped test file exists, add it tagged as `[MAPPED]`.
 
 #### Step 1.4: Import-based discovery
 
-For each changed source file, derive the module path (e.g., `datus/utils/json_utils.py` → `datus.utils.json_utils`), then search for test files that import it:
-
-```bash
-grep -rl "from datus\.utils\.json_utils import\|import datus\.utils\.json_utils" tests/unit_tests/
-```
+For each changed source file, derive the module path (e.g., `datus/utils/json_utils.py` → `datus.utils.json_utils`), then use the **Grep tool** (not bash grep) to search for test files that import it. Pattern example: `from datus\.utils\.json_utils import|import datus\.utils\.json_utils` in path `tests/unit_tests/`.
 
 Add discovered test files tagged as `[IMPORT]`.
 
 #### Step 1.5: Conftest & fixture impact analysis
 
-If any `conftest.py` was changed, read the diff to identify changed fixtures, then search for test files using those fixtures. Add them tagged as `[FIXTURE]`.
+If any `conftest.py` was changed, use `git diff <MERGE_BASE>..HEAD -- <conftest_path>` to identify changed fixtures, then use the **Grep tool** to find test files using those fixtures. Add them tagged as `[FIXTURE]`.
 
 #### Step 1.6: Deduplicate & validate
 
@@ -81,17 +80,29 @@ If any `conftest.py` was changed, read the diff to identify changed fixtures, th
 
 ### Phase 2: COVERAGE CHECK — Run Related Tests with Coverage
 
-Run all discovered test files with coverage measurement:
+Run all discovered test files with coverage measurement using `--brief` for compact JSON output. Only include test files that actually exist on disk:
 
 ```bash
-python3 ci/run-tests-and-coverage.py ${BASE_BRANCH} --test-paths <all_discovered_test_files>
+python3 ci/run-tests-and-coverage.py <BASE_BRANCH> --test-paths <test_file_1> <test_file_2> ... --brief
 ```
 
-Only include test files that actually exist on disk.
+The `--brief` flag suppresses pytest streaming logs but prints:
+1. **Test results** — pass/fail counts, failure tracebacks (for debugging)
+2. **Coverage** — overall and diff percentages, uncovered lines when < 80%
+3. **JSON_SUMMARY block** — structured JSON for easy parsing:
+```json
+{
+  "test_outcome": "success",
+  "test_total": 10, "test_passed": 9, "test_failed": 1, "test_skipped": 0,
+  "overall_coverage": "85.00", "diff_coverage": "72.50",
+  "failures": [{"test": "classname::test_name", "message": "..."}],
+  "violation_lines": {"datus/utils/foo.py": [10, 15, 23]}
+}
+```
+- `failures` — only present when tests fail
+- `violation_lines` — only present when `diff_coverage` < 80
 
-Parse results:
-1. Read `ci/test-report.md` for test pass/fail details.
-2. Read `ci/diff-cover.json`, extract `total_percent_covered`.
+Use the JSON_SUMMARY block for decision-making. Read failure tracebacks above it when fixing tests.
 
 **Decision**:
 - **All tests pass AND `total_percent_covered` >= 80** → Go to Phase 5 (report success).

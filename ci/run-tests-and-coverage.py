@@ -65,9 +65,10 @@ def run_tests(test_paths=None):
         f"--cov-report=html:{coverage_html}",
         "--cov-report=term-missing",
         f"--junitxml={results_xml}",
-        "-s",
-        "-vv",
-        "--tb=short",
+        "-q",
+        "--disable-warnings",
+        "--log-level=CRITICAL",
+        "--log-cli-level=CRITICAL",
         "--showlocals",
     ]
     log(f"Command: {' '.join(cmd)}")
