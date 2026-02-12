@@ -3,11 +3,11 @@
 - Respond in the same language as the user's question. Any language is acceptable in conversation.
 - All code (including comments, variable names, function names, etc.) MUST be written in English.
 
-# Agent Team Workflow
+# Test Generation
 
-This project supports a 3-role Agent Team workflow (Developer → Tester → Reviewer).
-- Use `/team-dev` to start the workflow (spawns tester and reviewer teammates)
-- See `.claude/skills/team-dev/SKILL.md` for details
+- After completing code development, use `/generate-tests` to automatically analyze branch changes and generate unit tests targeting diff coverage >= 80%.
+- The skill runs up to 3 iterations of: analyze changes → write tests → quality review → coverage verification.
+- See `.claude/skills/generate-tests/SKILL.md` for details
 
 # Code Formatting
 
