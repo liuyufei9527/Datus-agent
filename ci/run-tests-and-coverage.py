@@ -3,6 +3,7 @@
 
 Usage:
     python3 ci/run-tests-and-coverage.py [base_ref]
+    python3 ci/run-tests-and-coverage.py [base_ref] --test-paths t1.py t2.py
 
 Outputs (written to GITHUB_OUTPUT if available, otherwise stdout):
     overall       - Overall line coverage percentage
@@ -23,12 +24,12 @@ Generated files (all written to ci/ directory):
     ci/pytest-coverage.txt  - Full pytest output
 """
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,26 +42,42 @@ def log(msg):
 # 1. Run pytest
 # ---------------------------------------------------------------------------
 
-def run_tests():
-    """Run pytest and return the exit code."""
+
+def run_tests(test_paths=None):
+    """Run pytest and return the exit code.
+
+    Args:
+        test_paths: Optional list of specific test file paths to run.
+                    When None or empty, runs the full tests/unit_tests/ suite.
+    """
     log("Running pytest...")
     coverage_xml = os.path.join(OUT_DIR, "coverage.xml")
     coverage_html = os.path.join(OUT_DIR, "htmlcov")
     results_xml = os.path.join(OUT_DIR, "test-results.xml")
+    targets = test_paths if test_paths else ["tests/unit_tests/"]
     cmd = [
-        sys.executable, "-m", "pytest", "tests/unit_tests/",
+        sys.executable,
+        "-m",
+        "pytest",
+        *targets,
         "--cov=datus",
         f"--cov-report=xml:{coverage_xml}",
         f"--cov-report=html:{coverage_html}",
         "--cov-report=term-missing",
         f"--junitxml={results_xml}",
-        "-s", "-vv", "--tb=short", "--showlocals",
+        "-s",
+        "-vv",
+        "--tb=short",
+        "--showlocals",
     ]
     log(f"Command: {' '.join(cmd)}")
 
     with open(os.path.join(OUT_DIR, "pytest-coverage.txt"), "w") as log_file:
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
         if proc.stdout:
             for line in proc.stdout:
@@ -75,6 +92,7 @@ def run_tests():
 # ---------------------------------------------------------------------------
 # 2. Parse test results
 # ---------------------------------------------------------------------------
+
 
 def parse_test_results(junit_xml_path=None):
     if junit_xml_path is None:
@@ -100,12 +118,14 @@ def parse_test_results(junit_xml_path=None):
                 error = testcase.find("error")
                 fault = failure if failure is not None else error
                 if fault is not None:
-                    failures.append({
-                        "name": testcase.attrib.get("name", "unknown"),
-                        "classname": testcase.attrib.get("classname", ""),
-                        "message": fault.attrib.get("message", ""),
-                        "text": (fault.text or "").strip(),
-                    })
+                    failures.append(
+                        {
+                            "name": testcase.attrib.get("name", "unknown"),
+                            "classname": testcase.attrib.get("classname", ""),
+                            "message": fault.attrib.get("message", ""),
+                            "text": (fault.text or "").strip(),
+                        }
+                    )
 
         passed = total - failed - errors - skipped
         log(f"Test results: {passed} passed, {failed} failed, {errors} errors, {skipped} skipped (total: {total})")
@@ -113,8 +133,12 @@ def parse_test_results(junit_xml_path=None):
         log(f"Failed to parse {junit_xml_path}: {e}")
 
     return {
-        "total": total, "passed": passed, "failed": failed,
-        "errors": errors, "skipped": skipped, "failures": failures,
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "skipped": skipped,
+        "failures": failures,
     }
 
 
@@ -167,6 +191,7 @@ def write_test_report(test_results, output_path=None):
 # 3. Coverage metrics
 # ---------------------------------------------------------------------------
 
+
 def find_compare_branch(base_ref):
     """Determine the compare branch for diff-cover.
 
@@ -182,30 +207,32 @@ def find_compare_branch(base_ref):
 
     current = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     current_branch = current.stdout.strip() if current.returncode == 0 else ""
     log(f"Current branch: {current_branch}")
 
     result = subprocess.run(
         ["git", "branch", "-r", "--format=%(refname:short)"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         log("Failed to list remote branches")
         return None
 
     branches = [
-        b.strip() for b in result.stdout.splitlines()
-        if b.strip()
-        and not b.strip().endswith("/HEAD")
-        and b.strip() != f"origin/{current_branch}"
+        b.strip()
+        for b in result.stdout.splitlines()
+        if b.strip() and not b.strip().endswith("/HEAD") and b.strip() != f"origin/{current_branch}"
     ]
     log(f"Candidate remote branches: {len(branches)}")
 
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     head_commit = head.stdout.strip() if head.returncode == 0 else ""
     log(f"HEAD commit: {head_commit[:12]}")
@@ -217,7 +244,8 @@ def find_compare_branch(base_ref):
     for branch in branches:
         mb = subprocess.run(
             ["git", "merge-base", "HEAD", branch],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if mb.returncode != 0:
             continue
@@ -227,7 +255,8 @@ def find_compare_branch(base_ref):
             continue
         ts = subprocess.run(
             ["git", "log", "-1", "--format=%ct", commit],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if ts.returncode == 0:
             timestamp = int(ts.stdout.strip())
@@ -240,7 +269,8 @@ def find_compare_branch(base_ref):
     if best_commit:
         count = subprocess.run(
             ["git", "rev-list", "--count", f"{best_commit}..HEAD"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         commits_ahead = count.stdout.strip() if count.returncode == 0 else "?"
         log(f"Selected merge-base: {best_commit[:12]} (branch: {best_branch}, {commits_ahead} commits ahead)")
@@ -271,13 +301,17 @@ def extract_coverage(base_ref):
         log(f"Running diff-cover --compare-branch={compare_branch}")
         proc = subprocess.run(
             [
-                "diff-cover", coverage_xml,
+                "diff-cover",
+                coverage_xml,
                 f"--compare-branch={compare_branch}",
-                "--json-report", diff_json,
-                "--markdown-report", diff_report,
+                "--json-report",
+                diff_json,
+                "--markdown-report",
+                diff_report,
                 "--fail-under=0",
             ],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if proc.returncode != 0:
             log(f"diff-cover failed (exit {proc.returncode}): {proc.stderr.strip()}")
@@ -301,12 +335,31 @@ def extract_coverage(base_ref):
 # 4. Main
 # ---------------------------------------------------------------------------
 
+
 def main():
-    base_ref = sys.argv[1] if len(sys.argv) > 1 else ""
-    log(f"Starting (base_ref={base_ref!r})")
+    parser = argparse.ArgumentParser(
+        description="Run unit tests with coverage and generate reports.",
+    )
+    parser.add_argument(
+        "base_ref",
+        nargs="?",
+        default="",
+        help="Base branch reference for diff-cover comparison (e.g. 'main').",
+    )
+    parser.add_argument(
+        "--test-paths",
+        nargs="*",
+        default=None,
+        help="Specific test file paths to run. If omitted, runs all tests/unit_tests/.",
+    )
+    args = parser.parse_args()
+
+    base_ref = args.base_ref
+    test_paths = args.test_paths
+    log(f"Starting (base_ref={base_ref!r}, test_paths={test_paths!r})")
 
     # Run tests
-    test_exit_code = run_tests()
+    test_exit_code = run_tests(test_paths=test_paths)
     test_outcome = "success" if test_exit_code == 0 else "failure"
 
     # Parse test results

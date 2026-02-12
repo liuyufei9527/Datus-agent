@@ -21,7 +21,18 @@ Format Python code to pass CI format checks (matching `python-format-check.yml`)
 
 ## Workflow
 
-Set `TARGET` = `$ARGUMENTS` (if empty, format both `datus/` and `tests/`).
+### Step 0: Check for relevant changes
+
+If `$ARGUMENTS` is provided, skip this check and use `$ARGUMENTS` as `TARGET`.
+
+If `$ARGUMENTS` is empty, detect whether any Python files under `datus/` or `tests/` have been modified on the current branch:
+
+```bash
+git diff --name-only HEAD $(git merge-base HEAD main) -- 'datus/**/*.py' 'tests/**/*.py'
+```
+
+- If the command returns **no files** -> print "No Python files changed under datus/ or tests/. Skipping format." and **stop here**.
+- If the command returns files -> set `TARGET` to `datus/ tests/` and continue.
 
 ---
 
