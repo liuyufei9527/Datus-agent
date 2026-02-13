@@ -81,6 +81,7 @@ class GenSQLAgenticNode(AgenticNode):
         self.date_parsing_tools: Optional[DateParsingTools] = None
         self.filesystem_func_tool: Optional[FilesystemFuncTool] = None
         self._platform_doc_tool: Optional[PlatformDocSearchTool] = None
+        self.explorer_tool = None  # Optional[ExplorerTool]
 
         # Initialize plan mode attributes
         self.plan_mode_active = False
@@ -206,6 +207,8 @@ class GenSQLAgenticNode(AgenticNode):
             self.tools.extend(self.filesystem_func_tool.available_tools())
         if self._platform_doc_tool:
             self.tools.extend(self._platform_doc_tool.available_tools())
+        if self.explorer_tool:
+            self.tools.extend(self.explorer_tool.available_tools())
 
     def setup_tools(self):
         """Setup tools based on configuration."""
@@ -273,6 +276,27 @@ class GenSQLAgenticNode(AgenticNode):
         except Exception as e:
             logger.error(f"Failed to setup filesystem tools: {e}")
 
+    def _setup_explorer_tools(self):
+        """Setup the explorer tool (agent-based exploration)."""
+        try:
+            from datus.tools.llms_tools.explorer_tool import ExplorerTool
+
+            self.explorer_tool = ExplorerTool(
+                agent_config=self.agent_config,
+                node_name=self.get_node_name(),
+            )
+            # Share existing sub-tool instances so the explorer can reuse them
+            self.explorer_tool.set_sub_tools(
+                db_func_tool=self.db_func_tool,
+                context_search_tools=self.context_search_tools,
+                filesystem_root=self._resolve_workspace_root(),
+            )
+            self.explorer_tool.set_action_bus(self.action_bus)
+            self.tools.extend(self.explorer_tool.available_tools())
+            logger.debug("Setup explorer tools")
+        except Exception as e:
+            logger.error(f"Failed to setup explorer tools: {e}")
+
     def _setup_tool_pattern(self, pattern: str):
         """Setup tools based on pattern."""
         try:
@@ -289,6 +313,8 @@ class GenSQLAgenticNode(AgenticNode):
                     self._setup_filesystem_tools()
                 elif base_type == "platform_doc_tools":
                     self._setup_platform_doc_tools()
+                elif base_type == "explorer_tools":
+                    self._setup_explorer_tools()
                 else:
                     logger.warning(f"Unknown tool type: {base_type}")
 
@@ -303,6 +329,8 @@ class GenSQLAgenticNode(AgenticNode):
                 self._setup_filesystem_tools()
             elif pattern == "platform_doc_tools":
                 self._setup_platform_doc_tools()
+            elif pattern == "explorer_tools":
+                self._setup_explorer_tools()
 
             # Handle specific method patterns (e.g., "db_tools.list_tables")
             elif "." in pattern:
@@ -471,6 +499,7 @@ class GenSQLAgenticNode(AgenticNode):
             has_context_search_tools=bool(self.context_search_tools),
             has_parsing_tools=bool(self.date_parsing_tools),
             has_platform_doc_tools=bool(self._platform_doc_tool),
+            has_explorer_tools=bool(self.explorer_tool),
             agent_config=self.agent_config,
             workspace_root=self._resolve_workspace_root(),
         )
@@ -542,6 +571,10 @@ class GenSQLAgenticNode(AgenticNode):
 
             # Get or create session and any available summary
             session, conversation_summary = self._get_or_create_session()
+
+            # Pass session to explorer tool so it can create branches
+            if self.explorer_tool:
+                self.explorer_tool.set_session(session)
 
             # Check for plan mode activation
             is_plan_mode = getattr(user_input, "plan_mode", False)
@@ -962,6 +995,7 @@ def prepare_template_context(
     has_context_search_tools: bool = True,
     has_parsing_tools: bool = True,
     has_platform_doc_tools: bool = False,
+    has_explorer_tools: bool = False,
     agent_config: Optional[AgentConfig] = None,
     workspace_root: Optional[str] = None,
 ) -> dict:
@@ -976,6 +1010,7 @@ def prepare_template_context(
         has_context_search_tools: Whether context search tools are available
         has_parsing_tools: Whether date parsing tools are available
         has_platform_doc_tools: Whether platform documentation search tools are available
+        has_explorer_tools: Whether explorer tools are available
         agent_config: Agent configuration
         workspace_root: Workspace root path
 
@@ -989,6 +1024,7 @@ def prepare_template_context(
         "has_context_search_tools": has_context_search_tools,
         "has_parsing_tools": has_parsing_tools,
         "has_platform_doc_tools": has_platform_doc_tools,
+        "has_explorer_tools": has_explorer_tools,
     }
     if not isinstance(node_config, SubAgentConfig):
         node_config = SubAgentConfig.model_validate(node_config)

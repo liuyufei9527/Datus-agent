@@ -181,6 +181,7 @@ class ChatAgenticNode(GenSQLAgenticNode):
         self._setup_date_parsing_tools()
         self._setup_filesystem_tools()
         self._setup_skill_tools()
+        self._setup_explorer_tools()
         self._rebuild_tools()
         self._setup_platform_doc_tools()
 
@@ -349,6 +350,8 @@ class ChatAgenticNode(GenSQLAgenticNode):
         # Add skill tools
         if self.skill_func_tool:
             self.tools.extend(self.skill_func_tool.available_tools())
+        if self.explorer_tool:
+            self.tools.extend(self.explorer_tool.available_tools())
 
     @override
     def _get_system_prompt(
@@ -433,6 +436,10 @@ class ChatAgenticNode(GenSQLAgenticNode):
 
             # Get or create session and any available summary
             session, conversation_summary = self._get_or_create_session()
+
+            # Pass session to explorer tool so it can create branches
+            if self.explorer_tool:
+                self.explorer_tool.set_session(session)
 
             # Add database context to user message if provided
             from datus.agent.node.gen_sql_agentic_node import build_enhanced_message
