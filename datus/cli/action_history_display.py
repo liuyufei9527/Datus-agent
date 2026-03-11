@@ -2,14 +2,10 @@
 # Licensed under the Apache License, Version 2.0.
 # See http://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import os
-import sys
-from collections import deque
-from contextlib import contextmanager
-from io import StringIO
+import threading
 from typing import List, Optional
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -20,6 +16,9 @@ from datus.utils.loggings import get_logger
 from datus.utils.rich_util import dict_to_tree
 
 logger = get_logger(__name__)
+
+# Blinking dot animation frames for PROCESSING status
+_BLINK_FRAMES = ["○", "●"]
 
 
 class BaseActionContentGenerator:
@@ -107,6 +106,28 @@ class ActionContentGenerator(BaseActionContentGenerator):
                 text += f" - {status_text}{output_preview}{duration}"
 
         return text
+
+    def format_inline_completed(self, action: ActionHistory) -> List[str]:
+        """Format a completed action for inline display. Returns list of lines."""
+        if action.role == ActionRole.ASSISTANT:
+            return [f"⏺ 💬 {action.messages}"]
+        elif action.role == ActionRole.TOOL:
+            summary = self.format_streaming_action(action)
+            status_dot = "[green]⏺[/green]" if action.status == ActionStatus.SUCCESS else "[red]⏺[/red]"
+            # Replace the role dot prefix with status dot
+            # summary starts with "🔧 ..."
+            return [f"{status_dot} {summary}"]
+        elif action.role == ActionRole.WORKFLOW:
+            return [f"⏺ 🟡 {action.messages}"]
+        elif action.role == ActionRole.SYSTEM:
+            return [f"⏺ 🟣 {action.messages}"]
+        # INTERACTION: skip (handled by chat_commands)
+        return []
+
+    def format_inline_processing(self, action: ActionHistory, frame: str) -> str:
+        """Format a PROCESSING tool for blinking display."""
+        function_name = action.input.get("function_name", "") if action.input else ""
+        return f"{frame} 🔧 {function_name or action.messages}..."
 
     def get_role_color(self, role: ActionRole) -> str:
         """Get the appropriate color for an action role"""
@@ -394,7 +415,7 @@ class ActionContentGenerator(BaseActionContentGenerator):
 
 
 class ActionHistoryDisplay:
-    """Display ActionHistory in a rich format with separated content generation logic"""
+    """Display ActionHistory in a flat inline format (Claude Code style)"""
 
     def __init__(self, console: Optional[Console] = None, enable_truncation: bool = True):
         self.console = console or Console()
@@ -403,57 +424,8 @@ class ActionHistoryDisplay:
         # Create content generator with truncation setting
         self.content_generator = ActionContentGenerator(enable_truncation=enable_truncation)
 
-        # Sliding window for managing content overflow
-        self._action_window: Optional[deque] = None
-        self._max_actions: Optional[int] = None
-
         # Reference to current streaming context for live control
-        self._current_context: Optional["StreamingActionContext"] = None
-
-    def _get_terminal_height(self) -> int:
-        """Get terminal height, fallback to reasonable default"""
-        try:
-            return os.get_terminal_size().lines
-        except (OSError, ValueError):
-            return 24  # Fallback to standard terminal height
-
-    def _calculate_max_actions(self) -> int:
-        """Calculate maximum number of actions that can fit in terminal"""
-        terminal_height = self._get_terminal_height()
-        # Reserve space for: panel borders (4 lines), title (1 line), some padding
-        # Each action typically takes 1-3 lines depending on content
-        available_height = max(terminal_height - 8, 5)  # Minimum of 5 actions
-        # Assume average of 2 lines per action for conservative estimate
-        return max(available_height // 2, 5)
-
-    @contextmanager
-    def _capture_external_output(self):
-        """Context manager to capture stdout/stderr during Live display to prevent interference"""
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
-
-        # Create string buffers to capture output
-        stdout_buffer = StringIO()
-        stderr_buffer = StringIO()
-
-        try:
-            # Redirect stdout/stderr to buffers
-            sys.stdout = stdout_buffer
-            sys.stderr = stderr_buffer
-            yield stdout_buffer, stderr_buffer
-        finally:
-            # Restore original stdout/stderr
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-
-            # Optionally display captured output after Live session
-            captured_stdout = stdout_buffer.getvalue()
-            captured_stderr = stderr_buffer.getvalue()
-
-            if captured_stdout.strip():
-                logger.debug(f"Captured stdout during Live display: {captured_stdout}")
-            if captured_stderr.strip():
-                logger.debug(f"Captured stderr during Live display: {captured_stderr}")
+        self._current_context: Optional["InlineStreamingContext"] = None
 
     def format_action_summary(self, action: ActionHistory) -> str:
         """Format a single action as a summary line"""
@@ -547,47 +519,23 @@ class ActionHistoryDisplay:
 
         self.console.print(tree)
 
-    def display_streaming_actions(self, actions: List[ActionHistory]) -> "StreamingActionContext":
-        """Create a live display for streaming actions with sliding window and output capture"""
-
-        # Initialize sliding window if needed
-        if self._max_actions is None:
-            self._max_actions = self._calculate_max_actions()
-
-        if self._action_window is None:
-            self._action_window = deque(maxlen=self._max_actions)
-        else:
-            # Update maxlen if terminal size changed
-            current_max = self._calculate_max_actions()
-            if current_max != self._max_actions:
-                # Create new deque with updated size, preserving recent actions
-                new_window = deque(self._action_window, maxlen=current_max)
-                self._action_window = new_window
-                self._max_actions = current_max
-
-        return StreamingActionContext(actions, self)
+    def display_streaming_actions(self, actions: List[ActionHistory]) -> "InlineStreamingContext":
+        """Create an inline streaming display context for actions (Claude Code style)"""
+        return InlineStreamingContext(actions, self)
 
     def stop_live(self) -> None:
         """Stop the live display temporarily for user interaction."""
-        if self._current_context and self._current_context.live:
+        if self._current_context:
             try:
-                self._current_context.live.stop()
+                self._current_context.stop_display()
             except Exception as e:
                 logger.debug(f"Error stopping live display: {e}")
 
     def restart_live(self) -> None:
-        """Restart the live display after user interaction.
-
-        Uses recreate_live_display() to create a fresh Live instance from the
-        current cursor position, avoiding overlap with content printed during
-        the interaction (e.g., success messages).
-        """
+        """Restart the live display after user interaction."""
         if self._current_context:
             try:
-                # Use recreate_live_display() instead of live.start()
-                # This creates a new Live from current cursor position,
-                # preserving any content printed during the interaction
-                self._current_context.recreate_live_display()
+                self._current_context.restart_display()
             except Exception as e:
                 logger.debug(f"Error restarting live display: {e}")
 
@@ -620,7 +568,7 @@ class ActionHistoryDisplay:
                     for child in input_tree.children:
                         input_node.add(child.label)
                 else:
-                    input_node = action_node.add(f"[cyan]📥 Input:[/cyan] {str(action.input)}")
+                    action_node.add(f"[cyan]📥 Input:[/cyan] {str(action.input)}")
 
             if action.output:
                 if isinstance(action.output, dict):
@@ -629,7 +577,7 @@ class ActionHistoryDisplay:
                     for child in output_tree.children:
                         output_node.add(child.label)
                 else:
-                    output_node = action_node.add(f"[green]📤 Output:[/green] {str(action.output)}")
+                    action_node.add(f"[green]📤 Output:[/green] {str(action.output)}")
 
         self.console.print(tree)
 
@@ -650,94 +598,156 @@ class ActionHistoryDisplay:
             return str(data)
 
 
-class StreamingActionContext:
-    """Context manager for streaming actions display with output capture"""
+class InlineStreamingContext:
+    """Context manager for flat inline streaming display (Claude Code style).
+
+    Actions are printed permanently to the console as they arrive/complete.
+    PROCESSING tools are shown with a blinking dot animation via Rich Live.
+    Completed actions are printed permanently and never refreshed in-place.
+    """
 
     def __init__(self, actions_list: List[ActionHistory], display_instance: ActionHistoryDisplay):
         self.actions = actions_list
         self.display = display_instance
-        self.live = None
-        self._content_renderer = None  # Keep reference to content for recreation
-        self._display_checkpoint = 0  # Track how many actions were shown before recreation
+        self._processed_index = 0
+        self._tick = 0
+        self._stop_event = threading.Event()
+        self._refresh_thread: Optional[threading.Thread] = None
+        self._print_lock = threading.Lock()
+        self._live: Optional[Live] = None
+        self._paused = False
+
+    @property
+    def live(self) -> Optional[Live]:
+        """Compatibility property: expose the current mini-Live (if any)."""
+        return self._live
+
+    def stop_display(self) -> None:
+        """Stop display for INTERACTION pause."""
+        self._paused = True
+        self._stop_processing_live()
+
+    def restart_display(self) -> None:
+        """Resume display after INTERACTION pause."""
+        self._paused = False
 
     def recreate_live_display(self):
-        """
-        Recreate a brand new Live display from current cursor position.
+        """Compatibility shim: restart display after interaction."""
+        self.restart_display()
 
-        This is used in plan mode to create a fresh display after showing
-        static content (menus, plans), avoiding overlap with previous content.
-
-        Note: We do NOT reset the checkpoint here. Actions that were added
-        while the display was stopped should still be shown after recreation.
-        The checkpoint was already set when the display was first created.
-        """
-        # Stop and discard the old Live display
-        if self.live:
-            try:
-                self.live.stop()
-            except Exception:
-                # Ignore any errors when stopping the old display
-                pass
-
-        # Do NOT reset checkpoint - keep showing all actions from original start
-        # This ensures actions added between stop/recreate are not hidden
-
-        # Create a new Live display from current cursor position
-        # Reuse the same content renderer (it will respect the checkpoint)
-        if self._content_renderer:
-            self.live = Live(self._content_renderer, refresh_per_second=4)
-            self.live.start()
-
-        return self.live
+    # -- context manager --------------------------------------------------
 
     def __enter__(self):
-        # Create the content renderer
-        class StreamingContent:
-            def __init__(self, actions_list, display_instance: ActionHistoryDisplay, context):
-                self.actions = actions_list
-                self.display = display_instance
-                self.context = context  # Reference to StreamingActionContext for checkpoint
+        self._processed_index = 0
+        self._stop_event.clear()
+        self._paused = False
 
-            def __rich_console__(self, console, options):  # pylint: disable=unused-argument
-                # Filter actions based on checkpoint
-                # Only show actions that came after the display was recreated
-                filtered_actions = self.actions[self.context._display_checkpoint :]
-
-                # Update sliding window with filtered actions
-                if self.display._action_window is not None:
-                    self.display._action_window.clear()
-                    for action in filtered_actions:
-                        self.display._action_window.append(action)
-
-                # Generate content using content generator
-                window_actions = list(self.display._action_window) if self.display._action_window else []
-                content: str | Group = self.display.content_generator.generate_streaming_content(window_actions)
-
-                # Always yield the same panel structure
-                yield Panel(content, title="[bold cyan]Action Stream[/bold cyan]", border_style="cyan")
-
-        # Create the content object that will update dynamically
-        content = StreamingContent(self.actions, self.display, self)
-        self._content_renderer = content  # Save for potential recreation
-
-        # Create Live display
-        self.live = Live(content, refresh_per_second=4)
-
-        # Start the live display
-        self.live.start()
-
-        # Register this context with the display instance for live control
+        # Register with display instance
         self.display._current_context = self
 
+        # Start background refresh thread
+        self._refresh_thread = threading.Thread(target=self._refresh_loop, daemon=True)
+        self._refresh_thread.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):  # pylint: disable=unused-argument
-        if self.live:
-            self.live.stop()
+        self._stop_event.set()
+        self._stop_processing_live()
 
-        # Unregister this context from the display instance
+        if self._refresh_thread:
+            self._refresh_thread.join(timeout=2.0)
+
+        # Flush remaining actions after thread has stopped (no more concurrent access)
+        self._flush_remaining_actions()
+
+        # Unregister
         if self.display._current_context is self:
             self.display._current_context = None
+
+    # -- refresh loop (daemon thread) --------------------------------------
+
+    def _refresh_loop(self) -> None:
+        """Background thread: poll actions ~4x/sec and dispatch print/Live."""
+        while not self._stop_event.is_set():
+            if not self._paused:
+                self._process_actions()
+                self._tick += 1
+            self._stop_event.wait(timeout=0.25)
+
+    # -- core processing ---------------------------------------------------
+
+    def _process_actions(self) -> None:
+        """Walk from _processed_index forward and handle each action."""
+        while self._processed_index < len(self.actions):
+            action = self.actions[self._processed_index]
+
+            # Skip INTERACTION actions (handled by chat_commands)
+            if action.role == ActionRole.INTERACTION:
+                self._processed_index += 1
+                continue
+
+            # TOOL with PROCESSING -> show blinking Live
+            if action.role == ActionRole.TOOL and action.status == ActionStatus.PROCESSING:
+                self._update_processing_live(action)
+                # Don't advance index yet; wait for status change
+                return
+
+            # Completed action (non-PROCESSING) -> print permanently
+            self._stop_processing_live()
+            self._print_completed_action(action)
+            self._processed_index += 1
+
+    def _flush_remaining_actions(self) -> None:
+        """Flush all remaining actions at exit time without waiting for status changes."""
+        while self._processed_index < len(self.actions):
+            action = self.actions[self._processed_index]
+
+            if action.role == ActionRole.INTERACTION:
+                self._processed_index += 1
+                continue
+
+            # Skip PROCESSING tool entries — their SUCCESS version follows in the list
+            if action.role == ActionRole.TOOL and action.status == ActionStatus.PROCESSING:
+                self._processed_index += 1
+                continue
+
+            self._stop_processing_live()
+            self._print_completed_action(action)
+            self._processed_index += 1
+
+    def _print_completed_action(self, action: ActionHistory) -> None:
+        """Print a completed action permanently to the console."""
+        lines = self.display.content_generator.format_inline_completed(action)
+        if not lines:
+            return
+        with self._print_lock:
+            for line in lines:
+                self.display.console.print(line)
+
+    # -- blinking Live for PROCESSING tools --------------------------------
+
+    def _update_processing_live(self, action: ActionHistory) -> None:
+        """Create or update the mini-Live for a PROCESSING tool."""
+        frame = _BLINK_FRAMES[self._tick % len(_BLINK_FRAMES)]
+        text = self.display.content_generator.format_inline_processing(action, frame)
+        renderable = Text.from_markup(f"[white]{text}[/white]")
+
+        with self._print_lock:
+            if self._live is None:
+                self._live = Live(renderable, console=self.display.console, refresh_per_second=4, transient=True)
+                self._live.start()
+            else:
+                self._live.update(renderable)
+
+    def _stop_processing_live(self) -> None:
+        """Stop the current mini-Live if running."""
+        with self._print_lock:
+            if self._live is not None:
+                try:
+                    self._live.stop()
+                except Exception:
+                    pass
+                self._live = None
 
 
 def create_action_display(console: Optional[Console] = None, enable_truncation: bool = True) -> ActionHistoryDisplay:
