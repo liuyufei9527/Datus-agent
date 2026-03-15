@@ -163,10 +163,13 @@ class ActionContentGenerator(BaseActionContentGenerator):
                 duration_sec = (action.end_time - action.start_time).total_seconds()
                 duration = f" ({duration_sec:.1f}s)"
             lines.append(f"⏺ 🔧 {function_name or action.messages} - {status_text}{duration}")
-            # Show full arguments (no truncation)
+            # Show full arguments (no truncation), with tool-specific formatting
             if action.input and action.input.get("arguments"):
                 args = action.input["arguments"]
-                if isinstance(args, dict):
+                arg_lines = self._format_tool_args_verbose(function_name, args)
+                if arg_lines:
+                    lines.extend(arg_lines)
+                elif isinstance(args, dict):
                     for k, v in args.items():
                         lines.append(f"    {k}: {v}")
                 else:
@@ -591,6 +594,65 @@ class ActionContentGenerator(BaseActionContentGenerator):
         is_ref = data.get("is_reference_date", False)
         label = "reference date" if is_ref else "current date"
         return [f"{indent}📅 {label}: {date}"]
+
+    def _format_tool_args_verbose(self, function_name: str, args) -> List[str]:
+        """Format tool arguments with tool-specific formatting. Returns [] to use default."""
+        formatter = self._TOOL_ARG_FORMATTERS.get(function_name)
+        if formatter and isinstance(args, dict):
+            try:
+                result = formatter(self, args, "    ")
+                if result:
+                    return result
+            except Exception:
+                pass
+        return []
+
+    def _fmt_args_write_file(self, args: dict, indent: str) -> List[str]:
+        """Format write_file args: show path and line count instead of full content."""
+        lines = []
+        path = args.get("path", "")
+        if path:
+            lines.append(f"{indent}path: {path}")
+        content = args.get("content", "")
+        if isinstance(content, str):
+            line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+            lines.append(f"{indent}content: ({line_count} lines)")
+        file_type = args.get("file_type", "")
+        if file_type:
+            lines.append(f"{indent}file_type: {file_type}")
+        return lines
+
+    def _fmt_args_edit_file(self, args: dict, indent: str) -> List[str]:
+        """Format edit_file args: show path and diff-style edits."""
+        lines = []
+        path = args.get("path", "")
+        if path:
+            lines.append(f"{indent}path: {path}")
+        edits = args.get("edits", [])
+        if isinstance(edits, str):
+            try:
+                edits = json.loads(edits)
+            except Exception:
+                lines.append(f"{indent}edits: {edits}")
+                return lines
+        if isinstance(edits, list):
+            for i, edit in enumerate(edits):
+                if not isinstance(edit, dict):
+                    continue
+                old_text = edit.get("oldText", "")
+                new_text = edit.get("newText", "")
+                if len(edits) > 1:
+                    lines.append(f"{indent}edit {i + 1}:")
+                for ol in old_text.split("\n"):
+                    lines.append(f"{indent}  [red]- {ol}[/red]")
+                for nl in new_text.split("\n"):
+                    lines.append(f"{indent}  [green]+ {nl}[/green]")
+        return lines
+
+    _TOOL_ARG_FORMATTERS = {
+        "write_file": _fmt_args_write_file,
+        "edit_file": _fmt_args_edit_file,
+    }
 
     def _fmt_read_file(self, data, indent: str) -> List[str]:
         """Format read_file result: show line count only, not file content."""

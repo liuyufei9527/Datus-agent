@@ -4048,6 +4048,52 @@ class TestToolSpecificFormatters:
         assert "2 lines read" in combined
         assert "hello" not in combined
 
+    def test_fmt_args_write_file(self):
+        """write_file args show line count instead of full content."""
+        gen = self._gen()
+        args = {"path": "test.py", "content": "line1\nline2\nline3\n"}
+        lines = gen._fmt_args_write_file(args, "    ")
+        combined = "\n".join(lines)
+        assert "test.py" in combined
+        assert "3 lines" in combined
+        assert "line1" not in combined
+
+    def test_fmt_args_edit_file_diff(self):
+        """edit_file args show diff-style old/new text."""
+        gen = self._gen()
+        args = {
+            "path": "main.py",
+            "edits": [{"oldText": "old code", "newText": "new code"}],
+        }
+        lines = gen._fmt_args_edit_file(args, "    ")
+        combined = "\n".join(lines)
+        assert "main.py" in combined
+        assert "old code" in combined
+        assert "new code" in combined
+        assert any("- " in ln for ln in lines)
+        assert any("+ " in ln for ln in lines)
+
+    def test_fmt_args_edit_file_multiple_edits(self):
+        """edit_file with multiple edits shows numbered diffs."""
+        gen = self._gen()
+        args = {
+            "path": "a.py",
+            "edits": [
+                {"oldText": "foo", "newText": "bar"},
+                {"oldText": "baz", "newText": "qux"},
+            ],
+        }
+        lines = gen._fmt_args_edit_file(args, "    ")
+        combined = "\n".join(lines)
+        assert "edit 1" in combined
+        assert "edit 2" in combined
+
+    def test_format_tool_args_verbose_unknown_tool(self):
+        """Unknown tool returns [] so default formatting is used."""
+        gen = self._gen()
+        result = gen._format_tool_args_verbose("unknown_tool", {"k": "v"})
+        assert result == []
+
     def test_render_rich_to_lines(self):
         """_render_rich_to_lines converts a Rich renderable to indented lines."""
         gen = self._gen()
