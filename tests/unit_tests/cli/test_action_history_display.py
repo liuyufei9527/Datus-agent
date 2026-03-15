@@ -3757,6 +3757,81 @@ class TestToolSpecificFormatters:
         gen = self._gen()
         assert gen._fmt_read_query({"data": [[1]]}, "    ") == []
 
+    def test_fmt_read_query_compressed_csv(self):
+        """read_query with compressed format (DataCompressor output) renders as table."""
+        gen = self._gen()
+        data = {
+            "original_rows": 64,
+            "original_columns": ["name", "type", "count", "total"],
+            "is_compressed": True,
+            "compressed_data": "index,name,type,count,total\n0,A,X,10,20\n1,B,Y,30,40",
+            "removed_columns": [],
+            "compression_type": "rows",
+        }
+        lines = gen._fmt_read_query(data, "    ")
+        combined = "\n".join(lines)
+        assert "64 rows" in combined
+        assert "4 columns" in combined
+        assert "compressed" in combined
+        assert "name" in combined
+        assert "A" in combined
+
+    def test_fmt_read_query_compressed_with_removed_columns(self):
+        """read_query with compressed format shows omitted columns."""
+        gen = self._gen()
+        data = {
+            "original_rows": 100,
+            "original_columns": ["a", "b", "c", "d"],
+            "is_compressed": True,
+            "compressed_data": "a,b\n1,2",
+            "removed_columns": ["c", "d"],
+            "compression_type": "columns",
+        }
+        lines = gen._fmt_read_query(data, "    ")
+        combined = "\n".join(lines)
+        assert "Omitted columns" in combined
+        assert "c" in combined
+        assert "d" in combined
+
+    def test_fmt_read_query_compressed_plain_text(self):
+        """read_query with non-CSV compressed_data renders as plain text."""
+        gen = self._gen()
+        data = {
+            "original_rows": 5,
+            "original_columns": ["x"],
+            "is_compressed": False,
+            "compressed_data": "some plain text result\nwith multiple lines",
+            "removed_columns": [],
+            "compression_type": "none",
+        }
+        lines = gen._fmt_read_query(data, "    ")
+        combined = "\n".join(lines)
+        assert "5 rows" in combined
+        assert "complete" in combined
+        assert "some plain text result" in combined
+
+    def test_fmt_read_query_compressed_via_dispatcher(self):
+        """End-to-end: dispatcher routes compressed read_query output correctly."""
+        gen = self._gen()
+        output = {
+            "raw_output": {
+                "success": 1,
+                "result": {
+                    "original_rows": 10,
+                    "original_columns": ["id", "val"],
+                    "is_compressed": False,
+                    "compressed_data": "id,val\n1,hello\n2,world",
+                    "removed_columns": [],
+                    "compression_type": "none",
+                },
+            }
+        }
+        lines = gen._format_tool_output_verbose_by_type("read_query", output)
+        combined = "\n".join(lines)
+        assert "10 rows" in combined
+        assert "id" in combined
+        assert "hello" in combined
+
     def test_fmt_list_tables(self):
         gen = self._gen()
         data = [{"name": "users", "type": "table"}, {"name": "v_orders", "type": "view"}]

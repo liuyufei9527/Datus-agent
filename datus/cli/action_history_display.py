@@ -284,9 +284,48 @@ class ActionContentGenerator(BaseActionContentGenerator):
     # -- individual formatters ------------------------------------------------
 
     def _fmt_read_query(self, data, indent: str) -> List[str]:
-        """Format SQL query results as a Rich table."""
+        """Format SQL query results, handling both compressed and raw formats."""
         if not isinstance(data, dict):
             return []
+
+        # Handle compressed format from DataCompressor.compress()
+        compressed_data = data.get("compressed_data")
+        if compressed_data is not None:
+            lines = []
+            original_rows = data.get("original_rows", 0)
+            original_columns = data.get("original_columns", [])
+            col_count = len(original_columns) if isinstance(original_columns, list) else 0
+            is_compressed = data.get("is_compressed", False)
+
+            # Header with row/column counts
+            status = "compressed" if is_compressed else "complete"
+            lines.append(f"{indent}Query returned {original_rows} rows, {col_count} columns ({status})")
+
+            # Show removed columns if any
+            removed = data.get("removed_columns", [])
+            if removed:
+                lines.append(f"{indent}[dim]Omitted columns: {', '.join(str(c) for c in removed)}[/dim]")
+
+            # Render compressed_data as a table if it looks like CSV
+            if isinstance(compressed_data, str) and compressed_data.strip():
+                csv_lines = compressed_data.strip().split("\n")
+                if len(csv_lines) >= 2 and "," in csv_lines[0]:
+                    # Parse CSV into a Rich Table
+                    headers = csv_lines[0].split(",")
+                    table = Table(show_header=True, header_style="bold cyan", box=None, pad_edge=False)
+                    for h in headers:
+                        table.add_column(h.strip())
+                    for row_line in csv_lines[1:]:
+                        cells = row_line.split(",")
+                        table.add_row(*[c.strip() for c in cells])
+                    lines.extend(self._render_rich_to_lines(table, indent))
+                else:
+                    # Plain text format - just indent each line
+                    for text_line in csv_lines:
+                        lines.append(f"{indent}{text_line}")
+            return lines
+
+        # Handle raw format: {"columns": [...], "data": [[...], ...]}
         columns = data.get("columns")
         rows = data.get("data")
         if not columns or not isinstance(columns, list):
