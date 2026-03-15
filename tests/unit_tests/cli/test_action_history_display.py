@@ -2037,7 +2037,7 @@ class TestActionContentGeneratorFormatInlineExpanded:
         )
         lines = gen.format_inline_expanded(action)
         assert any("read_query" in line for line in lines)
-        assert any("sql: SELECT 1" in line for line in lines)
+        assert any("SELECT" in line for line in lines)
         assert any("limit: 10" in line for line in lines)
         assert any("✓" in line for line in lines)
         assert any("1.5s" in line for line in lines)
@@ -3243,7 +3243,7 @@ class TestRenderSubagentOtherRoles:
         )
         display._render_subagent_action(action, verbose=True)
         output = buf.getvalue()
-        assert "sql: SELECT 1" in output
+        assert "SELECT 1" in output
 
 
 # ── InlineStreamingContext ─────────────────────────────────────────
@@ -3497,7 +3497,7 @@ class TestInlineStreamingContextProcess:
         )
         ctx._print_completed_action(action)
         output = buf.getvalue()
-        assert "sql: SELECT 1" in output
+        assert "SELECT 1" in output
 
     def test_print_completed_empty_lines_skipped(self):
         """_print_completed_action does nothing for roles that return empty lines."""
@@ -4087,6 +4087,24 @@ class TestToolSpecificFormatters:
         combined = "\n".join(lines)
         assert "edit 1" in combined
         assert "edit 2" in combined
+
+    def test_fmt_args_read_query_sql_highlight(self):
+        """read_query args show SQL with syntax highlighting."""
+        gen = self._gen()
+        args = {"sql": "SELECT id, name FROM users WHERE age > 18", "database": "main_db"}
+        lines = gen._fmt_args_read_query(args, "    ")
+        combined = "\n".join(lines)
+        assert "main_db" in combined
+        assert "SELECT" in combined
+        assert "users" in combined
+
+    def test_fmt_args_read_query_extra_args(self):
+        """read_query args preserve non-sql/database args."""
+        gen = self._gen()
+        args = {"sql": "SELECT 1", "database": "db", "timeout": "30"}
+        lines = gen._fmt_args_read_query(args, "    ")
+        combined = "\n".join(lines)
+        assert "timeout: 30" in combined
 
     def test_format_tool_args_verbose_unknown_tool(self):
         """Unknown tool returns [] so default formatting is used."""

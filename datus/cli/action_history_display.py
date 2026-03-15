@@ -649,9 +649,27 @@ class ActionContentGenerator(BaseActionContentGenerator):
                     lines.append(f"{indent}  [green]+ {nl}[/green]")
         return lines
 
+    def _fmt_args_read_query(self, args: dict, indent: str) -> List[str]:
+        """Format read_query args: syntax-highlight the SQL statement."""
+        lines = []
+        sql = args.get("sql", "")
+        database = args.get("database", "")
+        if database:
+            lines.append(f"{indent}database: {database}")
+        if sql:
+            syntax = Syntax(sql.strip(), "sql", theme="monokai", line_numbers=False, word_wrap=True)
+            lines.extend(self._render_rich_to_lines(syntax, indent))
+        # Show any other args besides sql/database
+        for k, v in args.items():
+            if k not in ("sql", "database"):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
     _TOOL_ARG_FORMATTERS = {
         "write_file": _fmt_args_write_file,
         "edit_file": _fmt_args_edit_file,
+        "read_query": _fmt_args_read_query,
+        "query": _fmt_args_read_query,
     }
 
     def _fmt_read_file(self, data, indent: str) -> List[str]:
