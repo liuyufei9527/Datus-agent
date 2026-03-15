@@ -592,6 +592,23 @@ class ActionContentGenerator(BaseActionContentGenerator):
         label = "reference date" if is_ref else "current date"
         return [f"{indent}📅 {label}: {date}"]
 
+    def _fmt_read_file(self, data, indent: str) -> List[str]:
+        """Format read_file result: show line count only, not file content."""
+        if isinstance(data, str):
+            line_count = data.count("\n") + (1 if data and not data.endswith("\n") else 0)
+            return [f"{indent}{line_count} lines read"]
+        if isinstance(data, dict):
+            # read_multiple_files returns a dict of {path: content}
+            lines = []
+            for path, content in data.items():
+                if isinstance(content, str):
+                    lc = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+                    lines.append(f"{indent}{path}: {lc} lines read")
+                else:
+                    lines.append(f"{indent}{path}: read")
+            return lines
+        return []
+
     # Mapping from function_name to formatter method
     _TOOL_FORMATTERS = {
         "read_query": _fmt_read_query,
@@ -614,6 +631,8 @@ class ActionContentGenerator(BaseActionContentGenerator):
         "todo_update": _fmt_todo,
         "parse_temporal_expressions": _fmt_date_parse,
         "get_current_date": _fmt_current_date,
+        "read_file": _fmt_read_file,
+        "read_multiple_files": _fmt_read_file,
     }
 
     def format_inline_processing(self, action: ActionHistory, frame: str) -> str:

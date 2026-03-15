@@ -4010,6 +4010,44 @@ class TestToolSpecificFormatters:
         # Should fall back gracefully (return something, not crash)
         assert isinstance(lines, list)
 
+    def test_fmt_read_file_single(self):
+        """read_file shows line count only, not content."""
+        gen = self._gen()
+        content = "line1\nline2\nline3\n"
+        lines = gen._fmt_read_file(content, "    ")
+        assert len(lines) == 1
+        assert "3 lines read" in lines[0]
+        assert "line1" not in lines[0]
+
+    def test_fmt_read_file_no_trailing_newline(self):
+        gen = self._gen()
+        content = "line1\nline2"
+        lines = gen._fmt_read_file(content, "    ")
+        assert "2 lines read" in lines[0]
+
+    def test_fmt_read_file_empty(self):
+        gen = self._gen()
+        lines = gen._fmt_read_file("", "    ")
+        assert "0 lines read" in lines[0]
+
+    def test_fmt_read_file_multiple(self):
+        """read_multiple_files shows per-file line counts."""
+        gen = self._gen()
+        data = {"a.py": "x\ny\n", "b.py": "one\ntwo\nthree\n"}
+        lines = gen._fmt_read_file(data, "    ")
+        assert len(lines) == 2
+        assert any("a.py" in ln and "2 lines" in ln for ln in lines)
+        assert any("b.py" in ln and "3 lines" in ln for ln in lines)
+
+    def test_fmt_read_file_via_dispatcher(self):
+        """End-to-end: dispatcher routes read_file and hides content."""
+        gen = self._gen()
+        output = {"raw_output": {"success": 1, "result": "hello\nworld\n"}}
+        lines = gen._format_tool_output_verbose_by_type("read_file", output)
+        combined = "\n".join(lines)
+        assert "2 lines read" in combined
+        assert "hello" not in combined
+
     def test_render_rich_to_lines(self):
         """_render_rich_to_lines converts a Rich renderable to indented lines."""
         gen = self._gen()
