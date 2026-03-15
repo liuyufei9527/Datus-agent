@@ -4106,6 +4106,162 @@ class TestToolSpecificFormatters:
         combined = "\n".join(lines)
         assert "timeout: 30" in combined
 
+    # --- describe_table / get_table_ddl arg formatter ---
+
+    def test_fmt_args_describe_table_qualified_name(self):
+        """describe_table args show qualified table name, hide empty fields."""
+        gen = self._gen()
+        args = {"table_name": "users", "database": "mydb", "catalog": "", "schema_name": ""}
+        lines = gen._fmt_args_describe_table(args, "    ")
+        combined = "\n".join(lines)
+        assert "mydb.users" in combined
+        # Empty catalog/schema_name should not appear
+        assert "catalog" not in combined
+
+    def test_fmt_args_describe_table_full_qualified(self):
+        """describe_table with all parts shows fully qualified name."""
+        gen = self._gen()
+        args = {"table_name": "t", "database": "db", "catalog": "cat", "schema_name": "sch"}
+        lines = gen._fmt_args_describe_table(args, "    ")
+        combined = "\n".join(lines)
+        assert "cat.sch.t" in combined
+
+    def test_fmt_args_describe_table_via_dispatcher(self):
+        """describe_table routes through dispatcher."""
+        gen = self._gen()
+        lines = gen._format_tool_args_verbose("describe_table", {"table_name": "t", "database": "db"})
+        assert len(lines) > 0
+        assert any("t" in line for line in lines)
+
+    # --- search_knowledge / search_table arg formatter ---
+
+    def test_fmt_args_search_query_highlights_text(self):
+        """search_knowledge args show query text prominently."""
+        gen = self._gen()
+        args = {"query_text": "user activity bitmap", "subject_path": None, "top_n": 5}
+        lines = gen._fmt_args_search_query(args, "    ")
+        combined = "\n".join(lines)
+        assert "user activity bitmap" in combined
+        assert "top_n: 5" in combined
+        # None values should be hidden
+        assert "subject_path" not in combined
+
+    def test_fmt_args_search_query_via_dispatcher(self):
+        """search_knowledge routes through dispatcher."""
+        gen = self._gen()
+        lines = gen._format_tool_args_verbose("search_knowledge", {"query_text": "test"})
+        assert len(lines) > 0
+
+    # --- get_knowledge arg formatter ---
+
+    def test_fmt_args_get_knowledge_paths(self):
+        """get_knowledge args show paths as readable tree paths."""
+        gen = self._gen()
+        args = {"paths": [["Game_Analytics", "User_Classification", "cbitmap"], ["Data_Model", "Account_System"]]}
+        lines = gen._fmt_args_get_knowledge(args, "    ")
+        combined = "\n".join(lines)
+        assert "Game_Analytics > User_Classification > cbitmap" in combined
+        assert "Data_Model > Account_System" in combined
+
+    def test_fmt_args_get_knowledge_via_dispatcher(self):
+        """get_knowledge routes through dispatcher."""
+        gen = self._gen()
+        lines = gen._format_tool_args_verbose("get_knowledge", {"paths": [["a", "b"]]})
+        assert len(lines) > 0
+
+    # --- list_tables arg formatter ---
+
+    def test_fmt_args_list_tables_shows_scope(self):
+        """list_tables args show database scope."""
+        gen = self._gen()
+        args = {"catalog": "", "database": "benchmark", "schema_name": "", "include_views": True}
+        lines = gen._fmt_args_list_tables(args, "    ")
+        combined = "\n".join(lines)
+        assert "benchmark" in combined
+        assert "include_views" in combined
+
+    def test_fmt_args_list_tables_default_scope(self):
+        """list_tables with empty args shows default scope."""
+        gen = self._gen()
+        lines = gen._fmt_args_list_tables({"database": "", "catalog": ""}, "    ")
+        combined = "\n".join(lines)
+        assert "(default)" in combined
+
+    # --- read_file / move_file arg formatter ---
+
+    def test_fmt_args_file_path_read(self):
+        """read_file args show path."""
+        gen = self._gen()
+        args = {"path": "/home/user/data.sql"}
+        lines = gen._fmt_args_file_path(args, "    ")
+        combined = "\n".join(lines)
+        assert "/home/user/data.sql" in combined
+
+    def test_fmt_args_file_path_move(self):
+        """move_file args show source and destination."""
+        gen = self._gen()
+        args = {"source": "a.sql", "destination": "b.sql"}
+        lines = gen._fmt_args_file_path(args, "    ")
+        combined = "\n".join(lines)
+        assert "a.sql" in combined
+        assert "b.sql" in combined
+
+    def test_fmt_args_file_path_via_dispatcher(self):
+        """read_file and move_file route through dispatcher."""
+        gen = self._gen()
+        lines1 = gen._format_tool_args_verbose("read_file", {"path": "/x"})
+        lines2 = gen._format_tool_args_verbose("move_file", {"source": "a", "destination": "b"})
+        assert len(lines1) > 0
+        assert len(lines2) > 0
+
+    # --- get_knowledge result formatter ---
+
+    def test_fmt_get_knowledge_result(self):
+        """get_knowledge result shows knowledge entries with name and explanation."""
+        gen = self._gen()
+        data = [
+            {
+                "name": "cbitmap_classification",
+                "explanation": "Use cbitmap field for classification.",
+                "subject_path": ["Game_Analytics", "User_Classification"],
+            },
+            {"name": "account_mapping", "explanation": "Map vplayerid to suserid.", "subject_path": []},
+        ]
+        lines = gen._fmt_get_knowledge(data, "    ")
+        combined = "\n".join(lines)
+        assert "cbitmap_classification" in combined
+        assert "Use cbitmap" in combined
+        assert "Game_Analytics" in combined
+        assert "account_mapping" in combined
+
+    def test_fmt_get_knowledge_not_list(self):
+        """get_knowledge with non-list data returns empty."""
+        gen = self._gen()
+        assert gen._fmt_get_knowledge("not a list", "    ") == []
+
+    # --- list_subject_tree result formatter ---
+
+    def test_fmt_list_subject_tree_result(self):
+        """list_subject_tree result renders as tree structure."""
+        gen = self._gen()
+        data = {
+            "Game_Analytics": {
+                "User_Classification": {"knowledge": ["cbitmap", "platform_vs_game"]},
+                "Launch_Analysis": {"knowledge": ["launch_date"]},
+            }
+        }
+        lines = gen._fmt_list_subject_tree(data, "    ")
+        combined = "\n".join(lines)
+        assert "Knowledge Tree" in combined
+        assert "Game_Analytics" in combined
+        assert "User_Classification" in combined
+        assert "cbitmap" in combined
+
+    def test_fmt_list_subject_tree_not_dict(self):
+        """list_subject_tree with non-dict data returns empty."""
+        gen = self._gen()
+        assert gen._fmt_list_subject_tree("not a dict", "    ") == []
+
     def test_format_tool_args_verbose_unknown_tool(self):
         """Unknown tool returns [] so default formatting is used."""
         gen = self._gen()

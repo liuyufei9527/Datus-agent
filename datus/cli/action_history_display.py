@@ -595,6 +595,47 @@ class ActionContentGenerator(BaseActionContentGenerator):
         label = "reference date" if is_ref else "current date"
         return [f"{indent}📅 {label}: {date}"]
 
+    def _fmt_get_knowledge(self, data, indent: str) -> List[str]:
+        """Format get_knowledge result: show knowledge entries with name and explanation."""
+        if not isinstance(data, list):
+            return []
+        lines = []
+        for i, item in enumerate(data, 1):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name", "")
+            explanation = item.get("explanation", "")
+            subject_path = item.get("subject_path", [])
+            path_str = " > ".join(subject_path) if isinstance(subject_path, list) and subject_path else ""
+            header = f"{indent}{i}. [bold]{name}[/bold]"
+            if path_str:
+                header += f" [dim]({path_str})[/dim]"
+            lines.append(header)
+            if explanation:
+                lines.append(f"{indent}   {explanation}")
+        return lines
+
+    def _fmt_list_subject_tree(self, data, indent: str) -> List[str]:
+        """Format list_subject_tree result: render as a tree structure."""
+        if not isinstance(data, dict):
+            return []
+        tree = Tree("[bold]Knowledge Tree[/bold]")
+        self._build_tree(tree, data)
+        return self._render_rich_to_lines(tree, indent)
+
+    def _build_tree(self, parent, node: dict) -> None:
+        """Recursively build a Rich Tree from a nested dict."""
+        for key, value in node.items():
+            if isinstance(value, dict):
+                branch = parent.add(f"[bold]{key}[/bold]")
+                self._build_tree(branch, value)
+            elif isinstance(value, list):
+                branch = parent.add(f"[bold]{key}[/bold]")
+                for item in value:
+                    branch.add(str(item))
+            else:
+                parent.add(f"{key}: {value}")
+
     def _format_tool_args_verbose(self, function_name: str, args) -> List[str]:
         """Format tool arguments with tool-specific formatting. Returns [] to use default."""
         formatter = self._TOOL_ARG_FORMATTERS.get(function_name)
@@ -665,11 +706,99 @@ class ActionContentGenerator(BaseActionContentGenerator):
                 lines.append(f"{indent}{k}: {v}")
         return lines
 
+    def _fmt_args_describe_table(self, args: dict, indent: str) -> List[str]:
+        """Format describe_table/get_table_ddl args: show table name prominently, hide empty fields."""
+        lines = []
+        table_name = args.get("table_name", "")
+        database = args.get("database", "")
+        schema_name = args.get("schema_name", "")
+        catalog = args.get("catalog", "")
+        # Build qualified name: catalog.database.table
+        parts = [p for p in [catalog, schema_name or database, table_name] if p]
+        if parts:
+            lines.append(f"{indent}[bold]{'.'.join(parts)}[/bold]")
+        # Show any other non-empty, non-standard args
+        skip_keys = {"table_name", "database", "schema_name", "catalog"}
+        for k, v in args.items():
+            if k not in skip_keys and v not in (None, "", 0, False):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
+    def _fmt_args_search_query(self, args: dict, indent: str) -> List[str]:
+        """Format search_knowledge/search_table args: highlight the query text."""
+        lines = []
+        query = args.get("query_text", "")
+        if query:
+            lines.append(f"{indent}[italic]\"{query}\"[/italic]")
+        # Show non-empty, non-default args
+        skip_keys = {"query_text"}
+        for k, v in args.items():
+            if k not in skip_keys and v not in (None, "", 0, False):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
+    def _fmt_args_get_knowledge(self, args: dict, indent: str) -> List[str]:
+        """Format get_knowledge args: show paths as readable tree paths."""
+        lines = []
+        paths = args.get("paths", [])
+        if isinstance(paths, list):
+            for path in paths:
+                if isinstance(path, list):
+                    lines.append(f"{indent}{' > '.join(path)}")
+                else:
+                    lines.append(f"{indent}{path}")
+        for k, v in args.items():
+            if k != "paths" and v not in (None, "", 0, False):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
+    def _fmt_args_list_tables(self, args: dict, indent: str) -> List[str]:
+        """Format list_tables args: show database/schema, hide empty fields."""
+        lines = []
+        database = args.get("database", "")
+        schema_name = args.get("schema_name", "")
+        catalog = args.get("catalog", "")
+        target = ".".join(p for p in [catalog, schema_name or database] if p) or "(default)"
+        lines.append(f"{indent}scope: {target}")
+        skip_keys = {"database", "schema_name", "catalog"}
+        for k, v in args.items():
+            if k not in skip_keys and v not in (None, "", 0, False):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
+    def _fmt_args_file_path(self, args: dict, indent: str) -> List[str]:
+        """Format read_file/move_file args: show path(s) prominently."""
+        lines = []
+        for key in ("path", "source", "destination", "file_path"):
+            val = args.get(key, "")
+            if val:
+                lines.append(f"{indent}{key}: {val}")
+        skip_keys = {"path", "source", "destination", "file_path"}
+        for k, v in args.items():
+            if k not in skip_keys and v not in (None, "", 0, False):
+                lines.append(f"{indent}{k}: {v}")
+        return lines
+
     _TOOL_ARG_FORMATTERS = {
         "write_file": _fmt_args_write_file,
         "edit_file": _fmt_args_edit_file,
         "read_query": _fmt_args_read_query,
         "query": _fmt_args_read_query,
+        "describe_table": _fmt_args_describe_table,
+        "get_table_ddl": _fmt_args_describe_table,
+        "search_knowledge": _fmt_args_search_query,
+        "search_external_knowledge": _fmt_args_search_query,
+        "search_table": _fmt_args_search_query,
+        "search_metrics": _fmt_args_search_query,
+        "search_reference_sql": _fmt_args_search_query,
+        "search_documents": _fmt_args_search_query,
+        "search_semantic_objects": _fmt_args_search_query,
+        "get_knowledge": _fmt_args_get_knowledge,
+        "list_tables": _fmt_args_list_tables,
+        "list_databases": _fmt_args_list_tables,
+        "list_schemas": _fmt_args_list_tables,
+        "read_file": _fmt_args_file_path,
+        "move_file": _fmt_args_file_path,
     }
 
     def _fmt_read_file(self, data, indent: str) -> List[str]:
@@ -713,6 +842,8 @@ class ActionContentGenerator(BaseActionContentGenerator):
         "get_current_date": _fmt_current_date,
         "read_file": _fmt_read_file,
         "read_multiple_files": _fmt_read_file,
+        "get_knowledge": _fmt_get_knowledge,
+        "list_subject_tree": _fmt_list_subject_tree,
     }
 
     def format_inline_processing(self, action: ActionHistory, frame: str) -> str:
