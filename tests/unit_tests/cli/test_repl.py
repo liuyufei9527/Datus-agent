@@ -962,19 +962,27 @@ class TestCmdAgent:
         assert "Unknown agent" in output
 
     def test_cmd_agent_no_args_interactive(self, cli):
-        """'.agent' (no args) calls select_choice for interactive selection."""
+        """'.agent' (no args) uses ListSelectorApp for interactive selection."""
+        from datus.cli.list_selector_app import ListSelection
+
         cli.available_subagents = {"chat", "gen_sql"}
         cli.default_agent = ""
-        with patch("datus.cli.repl.select_choice", return_value="gen_sql") as mock_select:
+        mock_selection = ListSelection(key="gen_sql")
+        with patch("datus.cli.repl.ListSelectorApp") as mock_cls:
+            mock_cls.return_value.run.return_value = mock_selection
             cli._cmd_agent("")
-        mock_select.assert_called_once()
+        mock_cls.assert_called_once()
         assert cli.default_agent == "gen_sql"
 
     def test_cmd_agent_interactive_no_change(self, cli):
         """Interactive selection of same agent prints 'unchanged'."""
+        from datus.cli.list_selector_app import ListSelection
+
         cli.available_subagents = {"chat", "gen_sql"}
         cli.default_agent = ""
-        with patch("datus.cli.repl.select_choice", return_value="chat"):
+        mock_selection = ListSelection(key="chat")
+        with patch("datus.cli.repl.ListSelectorApp") as mock_cls:
+            mock_cls.return_value.run.return_value = mock_selection
             cli._cmd_agent("")
         assert cli.default_agent == ""
         output = cli.console.file.getvalue()
