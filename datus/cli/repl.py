@@ -132,9 +132,7 @@ class DatusCLI:
         self.selected_catalog_data = {}
         self.scope = getattr(args, "session_scope", None)
 
-        setup_exception_handler(
-            console_logger=self.console.print, prefix_wrap_func=lambda x: f"[bold red]{x}[/bold red]"
-        )
+        setup_exception_handler(console_logger=self.console.print, prefix_wrap_func=lambda x: f"[red]{x}[/red]")
         self.db_connector: BaseSqlConnector
 
         self.agent = None
@@ -348,7 +346,7 @@ class DatusCLI:
 
             # Show mode change message
             if self.plan_mode_active:
-                self.console.print("[bold green]Plan Mode Activated![/]")
+                self.console.print("[green]Plan Mode Activated![/]")
                 self.console.print("[dim]Enter your planning task and press Enter to generate plan[/]")
             else:
                 self.console.print("[yellow]Plan Mode Deactivated[/]")
@@ -528,7 +526,7 @@ class DatusCLI:
 
             def _announce() -> None:
                 if active:
-                    self.console.print("[bold green]Plan Mode Activated![/]")
+                    self.console.print("[green]Plan Mode Activated![/]")
                     self.console.print("[dim]Enter your planning task and press Enter to generate plan[/]")
                 else:
                     self.console.print("[yellow]Plan Mode Deactivated[/]")
@@ -717,7 +715,7 @@ class DatusCLI:
                 pass
             else:
                 logger.error(f"Error: {str(e)}")
-                self.console.print(f"[bold red]Error:[/] {str(e)}")
+                self.console.print(f"[red]Error:[/] {str(e)}")
         return None
 
     def run(self):
@@ -762,7 +760,7 @@ class DatusCLI:
                 if "exit" in str(e).lower() and "app" in str(e).lower():
                     continue
                 logger.error(f"Error: {str(e)}")
-                self.console.print(f"[bold red]Error:[/] {str(e)}")
+                self.console.print(f"[red]Error:[/] {str(e)}")
 
     def _pin_tui_to_bottom(self) -> None:
         """Push the cursor to the last terminal row before the banner prints.
@@ -870,8 +868,8 @@ class DatusCLI:
             self._workflow_runner = self._create_workflow_runner()
             # self.console.print("[dim]Agent initialized successfully in background[/]")
         except Exception as e:
-            self.console.print(f"[bold red]Error:[/]Failed to initialize agent in background: {str(e)}")
-            logger.error(f"[bold red]Failed to initialize agent in background: {e}")
+            self.console.print(f"[red]Error:[/]Failed to initialize agent in background: {str(e)}")
+            logger.error(f"Failed to initialize agent in background: {e}")
             self.agent_initializing = False
             self.agent = None
 
@@ -896,7 +894,7 @@ class DatusCLI:
             )
             return False
         else:
-            self.console.print("[bold red]Error:[/] AI features are not available. Agent initialization failed.")
+            self.console.print("[red]Error:[/] AI features are not available. Agent initialization failed.")
             return False
 
     def _cmd_list_namespaces(self):
@@ -904,7 +902,7 @@ class DatusCLI:
         table.add_column("Namespace")
         for namespace in self.agent_config.namespaces.keys():
             if self.agent_config.current_datasource == namespace:
-                table.add_row(f"[bold green]{namespace}[/]")
+                table.add_row(f"[green]{namespace}[/]")
             else:
                 table.add_row(namespace)
         self.console.print(table)
@@ -1047,16 +1045,16 @@ class DatusCLI:
             args = selected
 
         if args not in visible_subagents:
-            self.console.print(f"[bold red]Error:[/] Unknown agent '{args}'. Run '/agent' to see available agents.")
+            self.console.print(f"[red]Error:[/] Unknown agent '{args}'. Run '/agent' to see available agents.")
             return
 
         # "chat" resets to empty string (the chat node)
         if args == "chat":
             self.default_agent = ""
-            self.console.print("[bold green]Default agent reset to: chat[/]")
+            self.console.print("[green]Default agent reset to: chat[/]")
         else:
             self.default_agent = args
-            self.console.print(f"[bold green]Default agent set to: {args}[/]")
+            self.console.print(f"[green]Default agent set to: {args}[/]")
 
     def _cmd_switch_namespace(self, args: str):
         if args.strip() == "":
@@ -1085,7 +1083,7 @@ class DatusCLI:
             )
             self.reset_session()
             self.chat_commands.update_chat_node_tools()
-            self.console.print(f"[bold green]Namespace changed to: {self.agent_config.current_datasource}[/]")
+            self.console.print(f"[green]Namespace changed to: {self.agent_config.current_datasource}[/]")
 
     def _parse_command(self, text: str) -> Tuple[CommandType, str, str]:
         """Classify raw user input into a ``CommandType`` + canonical cmd + args.
@@ -1186,7 +1184,7 @@ class DatusCLI:
         try:
             if not self.db_connector:
                 error_msg = "No database connection. Please initialize a connection first."
-                self.console.print(f"[bold red]Error:[/] {error_msg}")
+                self.console.print(f"[red]Error:[/] {error_msg}")
 
                 # Update action with error
                 self.actions.update_action_by_id(
@@ -1207,7 +1205,7 @@ class DatusCLI:
 
             if not result:
                 error_msg = "No result from the query."
-                self.console.print(f"[bold red]Error:[/] {error_msg}")
+                self.console.print(f"[red]Error:[/] {error_msg}")
 
                 # Update action with error
                 self.actions.update_action_by_id(
@@ -1267,7 +1265,7 @@ class DatusCLI:
                             f"Query execution failed - received string instead of Arrow data:"
                             f" {result.error or 'Unknown error'}"
                         )
-                        self.console.print(f"[bold red]Error:[/] {error_msg}")
+                        self.console.print(f"[red]Error:[/] {error_msg}")
 
                         # Update action with error
                         self.actions.update_action_by_id(
@@ -1308,7 +1306,7 @@ class DatusCLI:
 
             else:
                 error_msg = result.error or "Unknown SQL error"
-                self.console.print(f"[bold red]SQL Error:[/] {error_msg}")
+                self.console.print(f"[red]SQL Error:[/] {error_msg}")
 
                 # Update action with SQL error
                 self.actions.update_action_by_id(
@@ -1328,7 +1326,7 @@ class DatusCLI:
                     self._workflow_runner.workflow.context.sql_contexts.append(new_record)
         except Exception as e:
             logger.error(f"SQL execution error: {str(e)}")
-            self.console.print(f"[bold red]Error:[/] {str(e)}")
+            self.console.print(f"[red]Error:[/] {str(e)}")
 
             # Update action with exception
             self.actions.update_action_by_id(
@@ -1343,7 +1341,7 @@ class DatusCLI:
         if cmd in self.commands:
             self.commands[cmd](args)
         else:
-            self.console.print(f"[bold red]Unknown command:[/] {cmd}")
+            self.console.print(f"[red]Unknown command:[/] {cmd}")
 
     def _execute_chat_command(self, message: str, subagent_name: str = None):
         """Route free-form chat text to the configured default agent."""
@@ -1364,7 +1362,7 @@ class DatusCLI:
         if handler is None:
             if self.service_commands.dispatch(cmd, args):
                 return None
-            self.console.print(f"[bold red]Unknown command:[/] {cmd}. Type /help.")
+            self.console.print(f"[red]Unknown command:[/] {cmd}. Type /help.")
             return None
         result = handler(args)
         # ``/rewind`` returns a user message to prefill in the input buffer.
@@ -1378,9 +1376,9 @@ class DatusCLI:
     def _render_unknown_command(self, token: str, hint: str):
         """Report an unrecognised slash or renamed legacy prefix to the user."""
         if hint:
-            self.console.print(f"[bold red]Unknown command:[/] '{token}' has been renamed to '{hint}'. Type /help.")
+            self.console.print(f"[red]Unknown command:[/] '{token}' has been renamed to '{hint}'. Type /help.")
         else:
-            self.console.print(f"[bold red]Unknown command:[/] {token}. Type /help.")
+            self.console.print(f"[red]Unknown command:[/] {token}. Type /help.")
 
     def _wait_for_agent_available(self, max_attempts=5, delay=1):
         """Wait for the agent to become available, with timeout."""
@@ -1396,7 +1394,7 @@ class DatusCLI:
             if self.check_agent_available():
                 return True
 
-        self.console.print("[bold red]Agent initialization timed out. Try again later.[/]")
+        self.console.print("[red]Agent initialization timed out. Try again later.[/]")
         return False
 
     def _cmd_bash(self, args: str):
@@ -1414,7 +1412,7 @@ class DatusCLI:
 
         if base_cmd not in whitelist:
             self.console.print(
-                f"[bold red]Security:[/] Command '{base_cmd}' not in whitelist. Allowed: {', '.join(whitelist)}"
+                f"[red]Security:[/] Command '{base_cmd}' not in whitelist. Allowed: {', '.join(whitelist)}"
             )
             return
 
@@ -1428,12 +1426,12 @@ class DatusCLI:
                 if result.stdout:
                     self.console.print(result.stdout)
             else:
-                self.console.print(f"[bold red]Command failed with code {result.returncode}:[/]\n{result.stderr}")
+                self.console.print(f"[red]Command failed with code {result.returncode}:[/]\n{result.stderr}")
 
         except subprocess.TimeoutExpired:
-            self.console.print("[bold red]Error:[/] Command timed out after 10 seconds.")
+            self.console.print("[red]Error:[/] Command timed out after 10 seconds.")
         except Exception as e:
-            self.console.print(f"[bold red]Error:[/] {str(e)}")
+            self.console.print(f"[red]Error:[/] {str(e)}")
 
     def _cmd_help(self, args: str):
         """Display help for all CLI commands.
@@ -1444,7 +1442,7 @@ class DatusCLI:
         """
 
         CMD_WIDTH = 30
-        lines: list[str] = ["[bold green]Datus-CLI Help[/]\n"]
+        lines: list[str] = ["[green]Datus-CLI Help[/]\n"]
         lines.append("[bold]SQL:[/]")
         lines.append(f"    {'<sql>':<{CMD_WIDTH}}Execute SQL query directly")
         lines.append("")
@@ -1518,13 +1516,13 @@ class DatusCLI:
         db_type = getattr(self.agent_config, "db_type", "") or ""
 
         if self.db_connector and database:
-            db_line = f"[bold green]{database}[/]"
+            db_line = f"[green]{database}[/]"
             if db_type:
                 db_line += f"  [dim]({db_type})[/]"
             if self.cli_context.current_db_name and self.cli_context.current_db_name != database:
                 db_line += f"  [dim]using {self.cli_context.current_db_name}[/]"
         elif database:
-            db_line = f"[bold green]{database}[/]  [yellow]not connected[/]"
+            db_line = f"[green]{database}[/]  [yellow]not connected[/]"
         else:
             db_line = "[yellow]not selected  (use /database to choose)[/]"
 
@@ -1618,7 +1616,7 @@ class DatusCLI:
                     db_name, self.db_connector = future.result(timeout=timeout_seconds)
                 except FuturesTimeoutError:
                     self.console.print(
-                        f"[bold red]Error:[/] Database connection timed out after {timeout_seconds} seconds. "
+                        f"[red]Error:[/] Database connection timed out after {timeout_seconds} seconds. "
                         f"Please check if the database server for namespace '{current_datasource}' is running "
                         "and accessible."
                     )
@@ -1627,7 +1625,7 @@ class DatusCLI:
                     return
 
             if not self.db_connector:
-                self.console.print("[bold red]Error:[/] No database connection.")
+                self.console.print("[red]Error:[/] No database connection.")
                 return
 
             # Update context based on dialect
@@ -1648,14 +1646,14 @@ class DatusCLI:
                     logger.debug(f"Connection test result: {connection_result}")
                 except FuturesTimeoutError:
                     self.console.print(
-                        f"[bold red]Error:[/] Connection test timed out after {timeout_seconds} seconds. "
+                        f"[red]Error:[/] Connection test timed out after {timeout_seconds} seconds. "
                         f"The database server for namespace '{current_datasource}' may be unresponsive."
                     )
                     logger.error(f"Connection test timeout for namespace: {current_datasource}")
                     self.db_connector = None
 
         except Exception as e:
-            self.console.print(f"[bold red]Error:[/] Failed to connect to database: {str(e)}")
+            self.console.print(f"[red]Error:[/] Failed to connect to database: {str(e)}")
             logger.error(f"Database connection failed for namespace {current_datasource}: {e}")
             self.db_connector = None
 
