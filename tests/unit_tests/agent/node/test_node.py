@@ -151,8 +151,14 @@ def init_metricflow_db() -> None:
     conn.close()
 
 
+@pytest.mark.nightly
 class TestNode:
-    """Test suite for Node class"""
+    """Test suite for Node class.
+
+    Requires the ``bird_sqlite`` acceptance dataset and a populated metricflow
+    DuckDB fixture, so these tests are scoped to the nightly tier per the
+    project testing rules.
+    """
 
     def setup_method(self) -> None:
         init_metricflow_db()

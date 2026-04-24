@@ -1361,6 +1361,7 @@ class TestEndToEndGenerationHooksInteraction:
         """Full flow: LLM calls end_semantic_model_generation → user approves sync ('y') → sync to KB."""
         import asyncio
         import os
+        from unittest.mock import patch
 
         from agents import FunctionTool
 
@@ -1438,12 +1439,22 @@ class TestEndToEndGenerationHooksInteraction:
 
         ui_task = asyncio.create_task(ui_approve_sync())
 
-        ahm = ActionHistoryManager()
-        actions = []
-        async for action in node.execute_stream_with_interactions(ahm):
-            actions.append(action)
+        # Mock _sync_semantic_to_db so the hook does not hit the real embedding model
+        # (the CI tier forbids network access for HuggingFace/fastembed downloads).
+        with patch.object(
+            GenerationHooks,
+            "_sync_semantic_to_db",
+            return_value={"success": True, "message": "Synced (mocked)"},
+        ) as mock_sync:
+            ahm = ActionHistoryManager()
+            actions = []
+            async for action in node.execute_stream_with_interactions(ahm):
+                actions.append(action)
 
-        await ui_task
+            await ui_task
+
+        # The sync must have been invoked because the user approved with 'y'.
+        assert mock_sync.called
 
         # Verify the tool was executed
         end_gen_results = [r for r in mock_llm_create.tool_results if r["tool"] == "end_semantic_model_generation"]

@@ -13,6 +13,10 @@ from datus.utils.loggings import get_logger
 
 log = get_logger(__name__)
 
+# These tests rely on the acceptance-config namespaces (snowflake/bird_sqlite)
+# and real vector-store embeddings, so they run in the nightly tier instead of CI.
+pytestmark = pytest.mark.nightly
+
 
 @pytest.fixture
 def db_path():

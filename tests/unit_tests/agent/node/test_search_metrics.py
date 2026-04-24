@@ -28,6 +28,7 @@ def agent_config(tmp_path) -> AgentConfig:
     return agent_config
 
 
+@pytest.mark.nightly
 class TestNode:
     def test_vector_and_scalar_query(self, agent_config: AgentConfig):
         sql_task = SqlTask(
@@ -83,6 +84,7 @@ class TestNode:
         assert node.result is not None, node.result is None
 
 
+@pytest.mark.nightly
 class TestRag:
     @pytest.fixture
     def metrics_rag(self, agent_config: AgentConfig) -> MetricRAG:

@@ -26,12 +26,36 @@ import pytest
 from datus.configuration.agent_config import AgentConfig, NodeConfig
 from tests.unit_tests.mock_llm_model import MockLLMModel
 
+# CI must never hit the network (HuggingFace Hub, etc.). Force huggingface_hub
+# into offline mode and neutralise the LanceDB embedding retry loop so a missing
+# model surfaces immediately instead of retrying for tens of minutes.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+try:
+    from lancedb.embeddings import base as _lance_emb_base
+    from lancedb.embeddings import utils as _lance_emb_utils
+
+    def _no_retry_wrapper(func, *_args, **_kwargs):
+        return func
+
+    _lance_emb_base.retry_with_exponential_backoff = _no_retry_wrapper
+    _lance_emb_utils.retry_with_exponential_backoff = _no_retry_wrapper
+    if "max_retries" in getattr(_lance_emb_base.EmbeddingFunction, "model_fields", {}):
+        _lance_emb_base.EmbeddingFunction.model_fields["max_retries"].default = 0
+except Exception:  # pragma: no cover - lancedb optional at import time
+    pass
+
 
 def pytest_collection_modifyitems(items):
-    """Automatically mark all tests under unit_tests/ with the 'ci' marker."""
+    """Automatically mark unit_tests/ tests with 'ci' unless they declare a
+    slower tier (nightly/regression)."""
     for item in items:
-        if "unit_tests" in str(item.fspath):
-            item.add_marker(pytest.mark.ci)
+        if "unit_tests" not in str(item.fspath):
+            continue
+        if item.get_closest_marker("nightly") or item.get_closest_marker("regression"):
+            continue
+        item.add_marker(pytest.mark.ci)
 
 
 # ---------------------------------------------------------------------------
