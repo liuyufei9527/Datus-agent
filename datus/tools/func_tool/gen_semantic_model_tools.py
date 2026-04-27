@@ -12,8 +12,7 @@ These tools are only used during semantic model generation.
 
 from typing import Any, Dict, List, Optional
 
-from agents import Tool
-
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolResult
 from datus.tools.func_tool.database import DBFuncTool
 from datus.utils.loggings import get_logger

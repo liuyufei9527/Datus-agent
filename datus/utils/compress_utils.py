@@ -6,9 +6,10 @@ import re
 from io import StringIO
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
-import litellm
 import pandas as pd
 import pyarrow as pa
+
+from datus.models.token_counter import count_tokens as _model_count_tokens
 
 
 # Static utility functions outside of class
@@ -258,12 +259,10 @@ class DataCompressor:
         self.output_format = output_format
 
     def count_tokens(self, text: str) -> int:
-        """Calculate the number of tokens in text using LiteLLM"""
+        """Calculate the number of tokens in text via the in-house counter."""
         try:
-            # Use LiteLLM's unified token counter (supports 100+ models)
-            return litellm.token_counter(model=self.model_name, text=text)
+            return _model_count_tokens(self.model_name, text)
         except Exception:
-            # Fallback: rough estimation (1 token ≈ 4 characters for English text)
             return len(text) // 4
 
     def _compress_columns(

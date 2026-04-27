@@ -6,8 +6,7 @@ import os
 import threading
 from pathlib import Path
 
-from agents.mcp import MCPServerStdio, MCPServerStdioParams
-
+from datus.models.mcp_client import MCPServerStdio, MCPServerStdioParams
 from datus.utils.loggings import get_logger
 
 logger = get_logger(__name__)

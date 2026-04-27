@@ -12,10 +12,10 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Union
 
-from agents import Tool
 from datus_db_core import BaseSqlConnector, connector_registry
 
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.schemas.agent_models import SubAgentConfig
 from datus.storage.schema_metadata.store import SchemaWithValueRAG
 from datus.storage.semantic_model.store import SemanticModelRAG

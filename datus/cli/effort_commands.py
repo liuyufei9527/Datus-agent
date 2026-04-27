@@ -194,15 +194,27 @@ class EffortCommands:
             return
         if not model_name:
             return
-        try:
-            import litellm
-
-            supports = bool(litellm.supports_reasoning(model=model_name, custom_llm_provider=provider))
-        except Exception:
-            return
+        # Heuristic — the LiteLLM lookup is gone; treat known thinking-capable
+        # families as "yes" so the CLI hint stays useful. The list mirrors what
+        # ``LiteLLMAdapter.is_known_non_thinking_model`` previously denied.
+        thinking_prefixes = (
+            "gpt-5",
+            "o1",
+            "o3",
+            "o4",
+            "claude-",
+            "deepseek-r",
+            "kimi-k2.5",
+            "kimi-k2-thinking",
+            "qwen3.5",
+            "gemini-2.5",
+            "glm-4.6",
+        )
+        supports = any(model_name.startswith(prefix) for prefix in thinking_prefixes)
+        del provider  # parameter retained for future provider-aware overrides
         print_info(
             self.console,
-            f"Active model '{model_name}' supports reasoning (per LiteLLM): {'yes' if supports else 'no'}",
+            f"Active model '{model_name}' supports reasoning (heuristic): {'yes' if supports else 'no'}",
         )
 
     def _current_effort(self) -> tuple[str, str]:

@@ -38,8 +38,8 @@ class TestInit:
             mock_model_instance.generate.return_value = "Hello!"
 
             mock_module = MagicMock()
-            mock_module.OpenAIModel.return_value = mock_model_instance
-            with patch.dict("sys.modules", {"datus.models.openai_model": mock_module}):
+            mock_module.OpenAICompatibleModel.return_value = mock_model_instance
+            with patch.dict("sys.modules", {"datus.models.openai_compatible": mock_module}):
                 success, error_msg = init._test_llm_connectivity()
 
             assert success is True, f"LLM probe should succeed, got error: {error_msg}"
@@ -62,8 +62,8 @@ class TestInit:
             mock_model_instance.generate.side_effect = ConnectionError("Connection refused")
 
             mock_module = MagicMock()
-            mock_module.OpenAIModel.return_value = mock_model_instance
-            with patch.dict("sys.modules", {"datus.models.openai_model": mock_module}):
+            mock_module.OpenAICompatibleModel.return_value = mock_model_instance
+            with patch.dict("sys.modules", {"datus.models.openai_compatible": mock_module}):
                 success, error_msg = init._test_llm_connectivity()
 
             assert success is False, "LLM probe should fail with connection error"
@@ -456,13 +456,13 @@ class TestConfigureLLM:
             mock_model_instance = MagicMock()
             mock_model_instance.generate.return_value = "Hello!"
             mock_module = MagicMock()
-            mock_module.KimiModel.return_value = mock_model_instance
+            mock_module.StubModel.return_value = mock_model_instance
 
             with (
                 patch("datus.cli.interactive_init.select_choice", side_effect=["kimi", "kimi-k2.5"]),
                 patch("datus.cli.interactive_init.Prompt.ask", return_value="https://api.moonshot.cn/v1"),
                 patch("datus.cli.interactive_init.getpass", return_value="test-key"),
-                patch.dict("sys.modules", {"datus.models.kimi_model": mock_module}),
+                patch.dict("sys.modules", {"datus.models.stub_model": mock_module}),
             ):
                 result = init._configure_llm()
 
@@ -484,13 +484,13 @@ class TestConfigureLLM:
             mock_model_instance = MagicMock()
             mock_model_instance.generate.side_effect = ConnectionError("blocked")
             mock_module = MagicMock()
-            mock_module.OpenAIModel.return_value = mock_model_instance
+            mock_module.OpenAICompatibleModel.return_value = mock_model_instance
 
             with (
                 patch("datus.cli.interactive_init.select_choice", side_effect=["openai", "gpt-4.1"]),
                 patch("datus.cli.interactive_init.Prompt.ask", return_value="https://api.openai.com/v1"),
                 patch("datus.cli.interactive_init.getpass", return_value="test-key"),
-                patch.dict("sys.modules", {"datus.models.openai_model": mock_module}),
+                patch.dict("sys.modules", {"datus.models.openai_compatible": mock_module}),
             ):
                 result = init._configure_llm()
 

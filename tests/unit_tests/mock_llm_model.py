@@ -30,11 +30,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
-from agents import SQLiteSession, Tool
-from agents.mcp import MCPServerStdio
-
 from datus.configuration.agent_config import ModelConfig
 from datus.models.base import LLMBaseModel
+from datus.models.mcp_client import MCPServerStdio
+from datus.models.session import SQLiteSession
+from datus.models.tool import Tool
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.utils.loggings import get_logger
 

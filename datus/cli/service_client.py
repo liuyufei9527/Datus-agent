@@ -23,9 +23,8 @@ from datus_scheduler_core.registry import SchedulerAdapterRegistry
 from datus.utils.loggings import get_logger
 
 if TYPE_CHECKING:
-    from agents import FunctionTool
-
     from datus.configuration.agent_config import AgentConfig
+    from datus.models.tool import FunctionTool
 
 logger = get_logger(__name__)
 

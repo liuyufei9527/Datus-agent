@@ -14,9 +14,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
-from agents import FunctionTool
-from agents.tool_context import ToolContext
-
+from datus.models.tool import FunctionTool, ToolContext
 from datus.tools.proxy.tool_result_channel import ToolResultChannel
 from datus.utils.loggings import get_logger
 

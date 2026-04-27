@@ -15,7 +15,6 @@ Covers:
 
 import inspect
 import os
-import sqlite3
 from typing import Union
 from unittest.mock import MagicMock, patch
 
@@ -361,8 +360,8 @@ class TestSessionManagerProjectIsolation:
             mgr_b.get_session("shared-name-session")
 
             # Each project has its own .db file in its own directory
-            assert os.path.isfile(os.path.join(project_a_dir, "shared-name-session.db"))
-            assert os.path.isfile(os.path.join(project_b_dir, "shared-name-session.db"))
+            assert os.path.isfile(os.path.join(project_a_dir, "shared-name-session.jsonl"))
+            assert os.path.isfile(os.path.join(project_b_dir, "shared-name-session.jsonl"))
 
             # Listing sessions shows the session in both, but they are stored in separate directories
             assert "shared-name-session" in mgr_a.list_sessions()
@@ -390,7 +389,7 @@ class TestSessionManagerProjectIsolation:
         for project_id in ["proj-001", "proj-002", "proj-003"]:
             session_dir = os.path.join(home, project_id, "sessions")
             assert os.path.isdir(session_dir)
-            db_file = os.path.join(session_dir, f"user-session-{project_id}.db")
+            db_file = os.path.join(session_dir, f"user-session-{project_id}.jsonl")
             assert os.path.isfile(db_file)
 
     def test_custom_dir_session_roundtrip(self, tmp_path):
@@ -403,21 +402,16 @@ class TestSessionManagerProjectIsolation:
             session = mgr.get_session(session_id)
             assert session.session_id == session_id
 
-            db_path = os.path.join(custom_dir, f"{session_id}.db")
-            assert os.path.isfile(db_path)
+            file_path = os.path.join(custom_dir, f"{session_id}.jsonl")
+            assert os.path.isfile(file_path)
 
-            # Write a session record so session_exists returns True
-            with sqlite3.connect(db_path) as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO agent_sessions (session_id) VALUES (?)",
-                    (session_id,),
-                )
-                conn.commit()
-
+            # New schema is JSONL-on-disk; create_session already touches the
+            # file so session_exists should report True even before any items
+            # are appended.
             assert mgr.session_exists(session_id) is True
 
             mgr.delete_session(session_id)
-            assert not os.path.isfile(db_path)
+            assert not os.path.isfile(file_path)
             assert mgr.session_exists(session_id) is False
         finally:
             mgr.close_all_sessions()

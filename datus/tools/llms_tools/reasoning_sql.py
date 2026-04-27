@@ -5,9 +5,8 @@
 import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from agents import Tool
-
 from datus.models.base import LLMBaseModel
+from datus.models.tool import Tool
 from datus.prompts.prompt_manager import get_prompt_manager
 from datus.prompts.reasoning_sql_with_mcp import get_reasoning_prompt
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager

@@ -7,11 +7,11 @@
 from pathlib import Path
 from typing import List, Optional
 
-from agents import Tool
 from datus_scheduler_core.models import SchedulerJobPayload
 from datus_scheduler_core.registry import SchedulerAdapterRegistry
 
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.tools import BaseTool
 from datus.tools.func_tool.base import FuncToolListResult, FuncToolResult, trans_to_function_tool
 from datus.utils.exceptions import DatusException

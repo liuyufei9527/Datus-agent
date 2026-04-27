@@ -7,10 +7,10 @@ import os
 from typing import Dict, List, Optional
 
 import yaml
-from agents import Tool
 from datus_storage_base.conditions import And, eq
 
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.storage.metric.store import MetricRAG
 from datus.storage.semantic_model.store import SemanticModelRAG
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool

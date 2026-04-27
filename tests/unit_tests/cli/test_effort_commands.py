@@ -201,42 +201,44 @@ class TestStatus:
         assert "not set" in cli.console.file.getvalue()
 
     def test_status_includes_supports_reasoning_yes(self):
+        # Heuristic now: gpt-5* is in the reasoning-capable allow list.
         cli = _stub_cli()
         cli.agent_config.active_model.return_value = MagicMock(
             model="gpt-5.4", type="openai", reasoning_effort=None, enable_thinking=False
         )
         cmds = EffortCommands(cli)
-        with patch(_PATCH_LOAD, return_value=None), patch("litellm.supports_reasoning", return_value=True):
+        with patch(_PATCH_LOAD, return_value=None):
             cmds.cmd_effort("status")
         out = cli.console.file.getvalue().lower()
         assert "supports reasoning" in out
         assert "yes" in out
 
     def test_status_includes_supports_reasoning_no(self):
+        # gpt-4.1 is not in the reasoning-capable allow list.
         cli = _stub_cli()
         cli.agent_config.active_model.return_value = MagicMock(
             model="gpt-4.1", type="openai", reasoning_effort=None, enable_thinking=False
         )
         cmds = EffortCommands(cli)
-        with patch(_PATCH_LOAD, return_value=None), patch("litellm.supports_reasoning", return_value=False):
+        with patch(_PATCH_LOAD, return_value=None):
             cmds.cmd_effort("status")
         out = cli.console.file.getvalue().lower()
         assert "supports reasoning" in out
         assert ": no" in out
 
     def test_status_silent_when_supports_reasoning_raises(self):
+        # Heuristic doesn't raise — surface "no" for unknown models instead of
+        # hiding the line entirely. The previous behaviour was tied to LiteLLM's
+        # exception path which no longer exists.
         cli = _stub_cli()
         cli.agent_config.active_model.return_value = MagicMock(
             model="some-custom-model", type="openai", reasoning_effort=None, enable_thinking=False
         )
         cmds = EffortCommands(cli)
-        with (
-            patch(_PATCH_LOAD, return_value=None),
-            patch("litellm.supports_reasoning", side_effect=RuntimeError("unknown provider")),
-        ):
+        with patch(_PATCH_LOAD, return_value=None):
             cmds.cmd_effort("status")  # must not raise
         out = cli.console.file.getvalue().lower()
-        assert "supports reasoning" not in out
+        assert ": no" in out
 
 
 class TestOffValue:

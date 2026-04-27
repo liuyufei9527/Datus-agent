@@ -9,8 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from agents import FunctionTool
 
+from datus.models.tool import FunctionTool
 from datus.tools.proxy.proxy_tool import (
     _FS_DEPENDENT_NODES,
     _matches,

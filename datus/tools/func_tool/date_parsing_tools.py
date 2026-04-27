@@ -5,10 +5,9 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional
 
-from agents import Tool
-
 from datus.configuration.agent_config import AgentConfig
 from datus.models.base import LLMBaseModel
+from datus.models.tool import Tool
 from datus.tools.date_tools import DateParserTool
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool
 from datus.utils.loggings import get_logger

@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 from typing import Iterator, List, Optional
 
-from agents import Tool
 from wcmatch import glob as wc_glob
 
+from datus.models.tool import Tool
 from datus.tools import BaseTool
 from datus.tools.func_tool import FuncToolResult
 from datus.tools.func_tool.fs_path_policy import (

@@ -8,12 +8,12 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
-from agents import Tool
 from datus_db_core import BaseSqlConnector
 
 from datus.configuration.agent_config import AgentConfig
 from datus.configuration.node_type import NodeType
 from datus.models.base import LLMBaseModel
+from datus.models.tool import Tool
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager
 from datus.schemas.chat_agentic_node_models import ChatNodeInput, ChatNodeResult
 from datus.schemas.date_parser_node_models import DateParserInput, DateParserResult

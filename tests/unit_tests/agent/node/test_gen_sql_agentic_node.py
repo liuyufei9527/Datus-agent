@@ -1518,10 +1518,9 @@ class TestEndToEndGenerationHooksInteraction:
         import asyncio
         import os
 
-        from agents import FunctionTool
-
         from datus.agent.node.chat_agentic_node import ChatAgenticNode
         from datus.cli.generation_hooks import GenerationHooks
+        from datus.models.tool import FunctionTool
 
         # Create a real YAML file under the project subject_dir so GenerationHooks
         # path containment check accepts it.
@@ -1631,10 +1630,9 @@ class TestEndToEndGenerationHooksInteraction:
         import asyncio
         import os
 
-        from agents import FunctionTool
-
         from datus.agent.node.chat_agentic_node import ChatAgenticNode
         from datus.cli.generation_hooks import GenerationHooks
+        from datus.models.tool import FunctionTool
 
         # Create a real YAML file under the project subject_dir so GenerationHooks
         # path containment check accepts it.
@@ -1734,10 +1732,9 @@ class TestEndToEndGenerationHooksInteraction:
     async def test_e2e_generation_hooks_no_yaml_no_interaction(self, real_agent_config, mock_llm_create, tmp_path):
         """When end_semantic_model_generation returns no file paths, no interaction is triggered."""
 
-        from agents import FunctionTool
-
         from datus.agent.node.chat_agentic_node import ChatAgenticNode
         from datus.cli.generation_hooks import GenerationHooks
+        from datus.models.tool import FunctionTool
 
         # Tool returns empty file list
         async def fake_end_gen_empty(ctx, args_str):

@@ -402,7 +402,7 @@ class TestGetDataDimensions:
 class TestDataCompressorCompress:
     """All token counts are mocked for determinism."""
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_empty_list_returns_none_result(self, _mock):
         dc = DataCompressor()
         result = dc.compress([])
@@ -410,13 +410,13 @@ class TestDataCompressorCompress:
         assert result["compressed_data"] == "Empty dataset"
         assert result["original_rows"] == 0
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_empty_dataframe(self, _mock):
         dc = DataCompressor()
         result = dc.compress(pd.DataFrame())
         assert result["is_compressed"] is False
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_small_list_no_compression(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         result = dc.compress(_make_list(5))
@@ -424,7 +424,7 @@ class TestDataCompressorCompress:
         assert result["compression_type"] == "none"
         assert result["original_rows"] == 5
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_large_list_row_compression(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         result = dc.compress(_make_list(50))
@@ -432,7 +432,7 @@ class TestDataCompressorCompress:
         assert result["compression_type"] == "rows"
         assert result["original_rows"] == 50
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_large_dataframe_row_compression(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         df = pd.DataFrame(_make_list(30))
@@ -440,7 +440,7 @@ class TestDataCompressorCompress:
         assert result["is_compressed"] is True
         assert result["compression_type"] == "rows"
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_large_pyarrow_table_row_compression(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         # Use all-string columns so the ellipsis row ("...") matches schema
@@ -450,7 +450,7 @@ class TestDataCompressorCompress:
         assert result["is_compressed"] is True
         assert result["compression_type"] == "rows"
 
-    @patch("datus.utils.compress_utils.litellm.token_counter")
+    @patch("datus.utils.compress_utils._model_count_tokens")
     def test_small_data_column_compression_when_over_threshold(self, mock_tc):
         """Force column compression on small data by returning high token count."""
         # Return huge count first (triggers compression), then small count
@@ -462,7 +462,7 @@ class TestDataCompressorCompress:
         assert result["is_compressed"] is True
         assert result["compression_type"] == "columns"
 
-    @patch("datus.utils.compress_utils.litellm.token_counter")
+    @patch("datus.utils.compress_utils._model_count_tokens")
     def test_rows_and_columns_compression(self, mock_tc):
         """Large data that still exceeds threshold after row compression → rows_and_columns."""
         # First call (after row compression): still too many tokens
@@ -473,19 +473,19 @@ class TestDataCompressorCompress:
         result = dc.compress(data)
         assert result["compression_type"] == "rows_and_columns"
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_compress_output_format_table(self, _mock):
         dc = DataCompressor(output_format="table", token_threshold=100000)
         result = dc.compress(_make_list(5))
         assert isinstance(result["compressed_data"], str)
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_compress_with_pyarrow_none_data(self, _mock):
         dc = DataCompressor()
         result = dc.compress(None)
         assert result["is_compressed"] is False
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_result_has_all_keys(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         result = dc.compress(_make_list(3))
@@ -498,24 +498,24 @@ class TestDataCompressorCompress:
             "compression_type",
         }
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_original_columns_is_list(self, _mock):
         dc = DataCompressor(token_threshold=100000)
         result = dc.compress(_make_list(3))
         assert isinstance(result["original_columns"], list)
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_compress_large_list_table_format(self, _mock):
         dc = DataCompressor(output_format="table", token_threshold=100000)
         result = dc.compress(_make_list(30))
         assert "..." in result["compressed_data"]
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_quick_compress_returns_string(self, _mock):
         result = DataCompressor.quick_compress(_make_list(5), token_threshold=100000)
         assert isinstance(result, str)
 
-    @patch("datus.utils.compress_utils.litellm.token_counter", side_effect=_mock_token_counter)
+    @patch("datus.utils.compress_utils._model_count_tokens", side_effect=_mock_token_counter)
     def test_count_tokens_fallback_on_exception(self, _mock):
         """When litellm raises, fallback estimation is used."""
         _mock.side_effect = Exception("model not found")
@@ -540,7 +540,7 @@ class TestDataCompressorCompress:
 
 
 class TestCompressColumns:
-    @patch("datus.utils.compress_utils.litellm.token_counter")
+    @patch("datus.utils.compress_utils._model_count_tokens")
     def test_no_compressible_columns_returns_unchanged(self, mock_tc):
         """If all columns are id/time columns there's nothing to remove."""
         mock_tc.return_value = 9999
@@ -550,7 +550,7 @@ class TestCompressColumns:
         assert removed == []
         assert list(compressed_df.columns) == list(df.columns)
 
-    @patch("datus.utils.compress_utils.litellm.token_counter")
+    @patch("datus.utils.compress_utils._model_count_tokens")
     def test_removes_middle_columns(self, mock_tc):
         """Columns are removed from the middle outward when over threshold."""
         # First call: over threshold; subsequent calls: under

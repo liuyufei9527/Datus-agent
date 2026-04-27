@@ -2,20 +2,25 @@
 # Licensed under the Apache License, Version 2.0.
 # See http://www.apache.org/licenses/LICENSE-2.0 for details.
 
-"""Session management wrapper for LLM models using OpenAI Agents Python session approach."""
+"""Session lifecycle / metadata helper.
 
-import ast
+In-house replacement for the previous SDK-shim version.  Sessions are
+JSONL files under ``{session_dir}/[{scope}/]<session_id>.jsonl``; token
+usage is held in memory on the active :class:`SQLiteSession` instance
+and is not persisted across processes.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 import re
-import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from agents.extensions.memory import AdvancedSQLiteSession
-
+from datus.models.session import SQLiteSession, copy_jsonl, read_jsonl, write_jsonl
 from datus.schemas.action_history import ActionHistory, ActionRole, ActionStatus
 from datus.utils.async_utils import run_async
 from datus.utils.exceptions import DatusException, ErrorCode
@@ -35,9 +40,9 @@ DEFAULT_CHAT_AGENT = "chat"
 def extract_agent_from_session_id(session_id: str) -> str:
     """Return the agent name encoded in *session_id*.
 
-    Session IDs produced by the CLI and API follow the pattern
-    ``{agent_name}_session_{uuid}``. Legacy IDs that lack the ``_session_``
-    delimiter are treated as belonging to the default chat agent.
+    Datus session IDs follow ``{agent_name}_session_{uuid}``; legacy
+    IDs without ``_session_`` resolve to the default chat agent so the
+    UI can still surface them.
     """
     if "_session_" in session_id:
         return session_id.rsplit("_session_", 1)[0]
@@ -45,22 +50,19 @@ def extract_agent_from_session_id(session_id: str) -> str:
 
 
 def session_matches_agent(session_id: str, agent_name: Optional[str]) -> bool:
-    """True when *session_id* belongs to *agent_name*.
-
-    ``None`` / empty / ``"chat"`` all resolve to the default chat agent, so
-    legacy (prefix-less) sessions are surfaced under chat.
-    """
     target = agent_name or DEFAULT_CHAT_AGENT
     return extract_agent_from_session_id(session_id) == target
 
 
 class SessionManager:
-    """
-    Manages sessions for multi-turn conversations across LLM models.
+    """Thin manager over per-session JSONL files."""
 
-    Internally uses SQLiteSession from OpenAI Agents Python for robust session handling,
-    but exposes a simple external interface that hides the complexity.
-    """
+    _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+    # On-disk extension. The legacy `.db` suffix is still recognised when
+    # listing existing sessions so users transitioning from the SDK era
+    # don't lose track of files (the contents themselves are not migrated).
+    _EXT = ".jsonl"
+    _LEGACY_EXTS = (".db",)
 
     def __init__(
         self,
@@ -69,240 +71,232 @@ class SessionManager:
         *,
         path_manager: Optional["DatusPathManager"] = None,
         agent_config: Optional[Any] = None,
-    ):
-        """
-        Initialize the session manager.
-
-        Args:
-            session_dir: Optional custom session directory path. When provided,
-                sessions are stored in this directory (used by SaaS backend for
-                per-project session isolation). When None, falls back to the
-                default {agent.home}/sessions path.
-            scope: Optional scope name for session directory isolation.
-                When provided, sessions are stored under {session_dir}/{scope}/.
-                When None or empty, sessions are stored directly in {session_dir}/
-                (backward compatible with previous behavior).
-                Only alphanumerics, hyphens, and underscores are allowed.
-        """
+    ) -> None:
         if session_dir and str(session_dir).strip():
-            self.session_dir = str(session_dir)
+            resolved_dir = str(session_dir)
         else:
             from datus.utils.path_manager import get_path_manager
 
-            self.session_dir = str(get_path_manager(path_manager=path_manager, agent_config=agent_config).sessions_dir)
+            resolved_dir = str(get_path_manager(path_manager=path_manager, agent_config=agent_config).sessions_dir)
 
-        # Apply scope subdirectory only when explicitly provided
         if scope and scope.strip():
             resolved_scope = scope.strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]+", resolved_scope):
                 raise DatusException(
                     ErrorCode.COMMON_VALIDATION_FAILED,
-                    message=f"Invalid scope: {resolved_scope!r}. "
-                    "Scope may only contain alphanumerics, hyphens, and underscores.",
+                    message=(
+                        f"Invalid scope: {resolved_scope!r}. Scope may only contain "
+                        "alphanumerics, hyphens, and underscores."
+                    ),
                 )
-            self.session_dir = os.path.join(self.session_dir, resolved_scope)
-        os.makedirs(self.session_dir, exist_ok=True)
-        self._sessions: Dict[str, AdvancedSQLiteSession] = {}
+            resolved_dir = os.path.join(resolved_dir, resolved_scope)
+        os.makedirs(resolved_dir, exist_ok=True)
+        self.session_dir = resolved_dir
+        self._sessions: Dict[str, SQLiteSession] = {}
 
-    # Shared pattern for validating session IDs.
-    # Allows alphanumerics, hyphens, underscores, and dots.
-    _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-    @staticmethod
-    def _validate_session_id(session_id: str) -> str:
-        """Validate that a session ID is safe for use in file paths.
-
-        Allows only alphanumerics, hyphens, underscores, and dots.
-        Raises ValueError if the session ID contains unsafe characters.
-        """
-        if not SessionManager._SESSION_ID_RE.fullmatch(session_id):
+    @classmethod
+    def _validate_session_id(cls, session_id: str) -> str:
+        if not cls._SESSION_ID_RE.fullmatch(session_id):
             raise ValueError(
-                f"Invalid session ID: {session_id!r}. "
-                "Session IDs may only contain alphanumerics, hyphens, underscores, and dots."
+                f"Invalid session ID: {session_id!r}. Allowed characters: alphanumerics, "
+                "hyphens, underscores, and dots."
             )
         return session_id
 
-    def get_session(self, session_id: str) -> AdvancedSQLiteSession:
-        """
-        Get or create a session with the given ID.
+    def _path(self, session_id: str) -> str:
+        return os.path.join(self.session_dir, f"{session_id}{self._EXT}")
 
-        Args:
-            session_id: Unique identifier for the session
+    def _resolve_existing_path(self, session_id: str) -> Optional[str]:
+        """Return the on-disk path for *session_id* if any (jsonl or legacy)."""
+        primary = self._path(session_id)
+        if os.path.exists(primary):
+            return primary
+        for ext in self._LEGACY_EXTS:
+            legacy = os.path.join(self.session_dir, f"{session_id}{ext}")
+            if os.path.exists(legacy):
+                return legacy
+        return None
 
-        Returns:
-            AdvancedSQLiteSession instance for the given session ID
-        """
+    # ------------------------------------------------------------------
+    # CRUD
+    # ------------------------------------------------------------------
+
+    def get_session(self, session_id: str) -> SQLiteSession:
         self._validate_session_id(session_id)
-        if session_id not in self._sessions:
-            db_path = os.path.join(self.session_dir, f"{session_id}.db")
-            session = AdvancedSQLiteSession(
-                session_id=session_id,
-                db_path=db_path,
-                create_tables=True,
-            )
-            self._sessions[session_id] = session
-            return session
+        cached = self._sessions.get(session_id)
+        if cached is not None:
+            return cached
+        session = SQLiteSession(session_id=session_id, db_path=self._path(session_id))
+        self._sessions[session_id] = session
+        return session
 
-        return self._sessions[session_id]
-
-    def create_session(self, session_id: str) -> AdvancedSQLiteSession:
-        """
-        Create a new session or get existing one.
-
-        Args:
-            session_id: Unique identifier for the session
-
-        Returns:
-            AdvancedSQLiteSession instance
-        """
+    def create_session(self, session_id: str) -> SQLiteSession:
         return self.get_session(session_id)
 
     def clear_session(self, session_id: str) -> None:
-        """
-        Clear all conversation history for a session.
-
-        Args:
-            session_id: Session ID to clear
-        """
-        # Load session from disk if not in memory
-        session = self.get_session(session_id) if self.session_exists(session_id) else self._sessions.get(session_id)
-        if session:
-            run_async(session.clear_session())
-            logger.debug(f"Cleared session: {session_id}")
-        else:
-            logger.warning(f"Attempted to clear non-existent session: {session_id}")
+        if not self.session_exists(session_id):
+            logger.warning("Attempted to clear non-existent session: %s", session_id)
+            return
+        session = self.get_session(session_id)
+        run_async(session.clear_session())
+        logger.debug("Cleared session: %s", session_id)
 
     def delete_session(self, session_id: str) -> None:
-        """
-        Delete a session and its database file.
-
-        Args:
-            session_id: Session ID to delete
-        """
         self._validate_session_id(session_id)
-        # Remove from in-memory cache if present
         self._sessions.pop(session_id, None)
+        path = self._resolve_existing_path(session_id)
+        if path is None:
+            logger.warning("Attempted to delete non-existent session: %s", session_id)
+            return
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        # Tolerate stray sqlite WAL/SHM files left over from the SDK era.
+        for suffix in ("-shm", "-wal"):
+            aux = path + suffix
+            if os.path.exists(aux):
+                try:
+                    os.remove(aux)
+                except OSError:
+                    pass
+        logger.debug("Deleted session: %s", session_id)
 
-        # Delete the database file and SQLite WAL/SHM files if they exist on disk
-        db_path = os.path.join(self.session_dir, f"{session_id}.db")
-        if os.path.exists(db_path):
-            os.remove(db_path)
-            for suffix in ("-shm", "-wal"):
-                wal_path = db_path + suffix
-                if os.path.exists(wal_path):
-                    os.remove(wal_path)
-            logger.debug(f"Deleted session: {session_id}")
+    # ------------------------------------------------------------------
+    # Inspection
+    # ------------------------------------------------------------------
+
+    def list_sessions(self, limit: Optional[int] = None, sort_by_modified: bool = False) -> List[str]:
+        if not os.path.exists(self.session_dir):
+            return []
+        entries: List[tuple[str, float]] = []
+        for filename in os.listdir(self.session_dir):
+            stem, ext = os.path.splitext(filename)
+            if ext != self._EXT and ext not in self._LEGACY_EXTS:
+                continue
+            full = os.path.join(self.session_dir, filename)
+            try:
+                mtime = os.path.getmtime(full)
+            except OSError:
+                continue
+            entries.append((stem, mtime))
+        if sort_by_modified:
+            entries.sort(key=lambda item: item[1], reverse=True)
+        seen: set[str] = set()
+        ids: List[str] = []
+        for sid, _ in entries:
+            if sid in seen:
+                continue
+            seen.add(sid)
+            ids.append(sid)
+        if limit is not None:
+            ids = ids[: int(limit)]
+        return ids
+
+    def session_exists(self, session_id: str) -> bool:
+        self._validate_session_id(session_id)
+        return self._resolve_existing_path(session_id) is not None
+
+    def get_session_info(self, session_id: str) -> Dict[str, Any]:
+        self._validate_session_id(session_id)
+        path = self._resolve_existing_path(session_id)
+        if path is None:
+            return {"exists": False}
+
+        info: Dict[str, Any] = {"exists": True, "session_id": session_id, "db_path": path}
+        try:
+            stat = os.stat(path)
+            info["file_size"] = stat.st_size
+            info["file_modified"] = stat.st_mtime
+            info["created_at"] = datetime.fromtimestamp(stat.st_ctime).isoformat()
+            info["updated_at"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+        except OSError as exc:
+            logger.debug("stat failed for %s: %s", path, exc)
+
+        items = read_jsonl(path)
+        info["message_count"] = len(items)
+        info["item_count"] = len(items)
+        info["latest_message_at"] = info.get("updated_at")
+
+        first_user, first_user_at = self._first_user_message(items, descending=False)
+        latest_user, latest_user_at = self._first_user_message(items, descending=True)
+        info["first_user_message"] = first_user
+        info["first_user_message_at"] = first_user_at or info.get("created_at")
+        info["latest_user_message"] = latest_user
+        info["latest_user_message_at"] = latest_user_at or info.get("updated_at")
+
+        # Token usage is in-memory only — surface the tally for the cached
+        # session if present; otherwise return zero so the CLI status bar
+        # never blows up.
+        cached = self._sessions.get(session_id)
+        if cached is not None:
+            usage = cached.get_turn_usage()
+            info["total_tokens"] = sum(slot.get("total_tokens", 0) for slot in usage.values())
         else:
-            logger.warning(f"Attempted to delete non-existent session: {session_id}")
+            info["total_tokens"] = 0
+        return info
+
+    @staticmethod
+    def _first_user_message(items: List[Dict[str, Any]], *, descending: bool) -> tuple[Optional[str], Optional[str]]:
+        seq = reversed(items) if descending else items
+        for item in seq:
+            if item.get("role") == "user":
+                return extract_user_input(item.get("content", "")), item.get("created_at")
+        return None, None
+
+    def get_detailed_usage(self, session_id: str) -> Dict[str, Any]:
+        """Return memory-only token usage; zeros for sessions not in cache."""
+        empty = {
+            "total": {
+                "requests": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cached_tokens": 0,
+            },
+            "turns": [],
+            "turn_count": 0,
+        }
+        cached = self._sessions.get(session_id)
+        if cached is None:
+            return empty
+        usage = cached.get_turn_usage()
+        if not usage:
+            return empty
+        total = dict(empty["total"])
+        turns: List[Dict[str, Any]] = []
+        for turn_number in sorted(usage):
+            slot = usage[turn_number]
+            total["requests"] += slot.get("requests", 0)
+            total["input_tokens"] += slot.get("input_tokens", 0)
+            total["output_tokens"] += slot.get("output_tokens", 0)
+            total["total_tokens"] += slot.get("total_tokens", 0)
+            total["cached_tokens"] += slot.get("cached_tokens", 0)
+            turns.append({"turn_number": turn_number, **slot})
+        return {"total": total, "turns": turns, "turn_count": len(turns)}
+
+    # ------------------------------------------------------------------
+    # Copy / rewind
+    # ------------------------------------------------------------------
 
     def copy_session(self, source_session_id: str, target_node_name: str) -> str:
-        """Copy a session to a new one with a different node-name prefix.
-
-        All messages and turn_usage rows are copied.  The new session_id uses
-        ``target_node_name`` as prefix so that
-        :meth:`ChatCommands._extract_node_type_from_session_id` resolves the
-        correct node type.
-
-        Args:
-            source_session_id: The session to copy from.
-            target_node_name: Node name for the new session_id prefix
-                (e.g. ``"gensql"``, ``"chat"``).
-
-        Returns:
-            The new session ID.
-        """
         self._validate_session_id(source_session_id)
         new_session_id = f"{target_node_name}_session_{uuid.uuid4().hex[:8]}"
-
-        source_db_path = os.path.join(self.session_dir, f"{source_session_id}.db")
-        if not os.path.exists(source_db_path):
-            # No persisted session data to copy; return new id so the node starts fresh
-            return new_session_id
-
-        # Read all messages, message_structure, and turn_usage from source.
-        # We must preserve agent_messages.id so that message_structure.message_id
-        # references remain valid in the new DB; AdvancedSQLiteSession.get_items()
-        # relies on a JOIN between agent_messages and message_structure, so copying
-        # agent_messages alone would result in an empty conversation history.
-        with sqlite3.connect(source_db_path, timeout=5.0) as src_conn:
-            cursor = src_conn.cursor()
-            cursor.execute(
-                "SELECT id, message_data, created_at FROM agent_messages WHERE session_id = ? ORDER BY id",
-                (source_session_id,),
-            )
-            message_rows = cursor.fetchall()
-
-            structure_rows: list = []
-            try:
-                cursor.execute(
-                    "SELECT message_id, branch_id, message_type, sequence_number, "
-                    "user_turn_number, branch_turn_number, tool_name, created_at "
-                    "FROM message_structure WHERE session_id = ? ORDER BY sequence_number",
-                    (source_session_id,),
-                )
-                structure_rows = cursor.fetchall()
-            except sqlite3.OperationalError:
-                pass
-
-            turn_usage_rows: list = []
-            try:
-                cursor.execute(
-                    "SELECT branch_id, user_turn_number, requests, input_tokens, "
-                    "output_tokens, total_tokens, input_tokens_details, "
-                    "output_tokens_details, created_at "
-                    "FROM turn_usage WHERE session_id = ?",
-                    (source_session_id,),
-                )
-                turn_usage_rows = cursor.fetchall()
-            except sqlite3.OperationalError:
-                pass
-
-        # Materialize tables in the new DB first (short-lived session is released
-        # before bulk inserts), then use a single raw connection with executemany
-        # for all writes. Avoids two concurrent connections on the same file and
-        # is substantially faster for long histories.
-        new_db_path = os.path.join(self.session_dir, f"{new_session_id}.db")
-        AdvancedSQLiteSession(session_id=new_session_id, db_path=new_db_path, create_tables=True)
-
-        with sqlite3.connect(new_db_path, timeout=5.0) as new_conn:
-            new_conn.execute(
-                "INSERT OR IGNORE INTO agent_sessions (session_id) VALUES (?)",
-                (new_session_id,),
-            )
-            # Preserve id to keep message_structure.message_id references valid.
-            new_conn.executemany(
-                "INSERT INTO agent_messages (id, session_id, message_data, created_at) VALUES (?, ?, ?, ?)",
-                [
-                    (msg_id, new_session_id, message_data, created_at)
-                    for msg_id, message_data, created_at in message_rows
-                ],
-            )
-            new_conn.executemany(
-                "INSERT INTO message_structure "
-                "(session_id, message_id, branch_id, message_type, sequence_number, "
-                "user_turn_number, branch_turn_number, tool_name, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(new_session_id, *row) for row in structure_rows],
-            )
-            new_conn.executemany(
-                "INSERT OR IGNORE INTO turn_usage "
-                "(session_id, branch_id, user_turn_number, requests, input_tokens, "
-                "output_tokens, total_tokens, input_tokens_details, "
-                "output_tokens_details, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(new_session_id, *row) for row in turn_usage_rows],
-            )
-            new_conn.commit()
-
-        # Cache a fresh session pointing at the populated DB (tables already exist).
-        self._sessions[new_session_id] = AdvancedSQLiteSession(
-            session_id=new_session_id, db_path=new_db_path, create_tables=False
-        )
-
+        src = self._resolve_existing_path(source_session_id)
+        if src is None:
+            return new_session_id  # nothing to copy; caller will start fresh
+        new_path = self._path(new_session_id)
+        copy_jsonl(src, new_path)
+        self._sessions[new_session_id] = SQLiteSession(session_id=new_session_id, db_path=new_path, create_tables=False)
         logger.info(
-            f"Copied session {source_session_id} -> {new_session_id} "
-            f"({len(message_rows)} messages, {len(structure_rows)} structure rows, "
-            f"{len(turn_usage_rows)} turn_usage rows)"
+            "Copied session %s -> %s (%d bytes)",
+            source_session_id,
+            new_session_id,
+            os.path.getsize(new_path),
         )
         return new_session_id
 
@@ -312,777 +306,263 @@ class SessionManager:
         up_to_user_turn: int,
         include_assistant_response: bool = True,
     ) -> str:
-        """
-        Create a new session by copying messages up to a given user turn from an existing session.
-
-        Args:
-            source_session_id: The session to copy from
-            up_to_user_turn: Keep messages up to and including this user turn number (1-based)
-            include_assistant_response: If True, also include the assistant response after the last user turn
-
-        Returns:
-            The new session ID
-        """
         self._validate_session_id(source_session_id)
         if up_to_user_turn < 1:
             raise ValueError("up_to_user_turn must be >= 1")
-        # Extract node type and generate new session ID
-        if "_session_" in source_session_id:
-            node_type = source_session_id.rsplit("_session_", 1)[0]
-        else:
-            node_type = "chat"
+        node_type = extract_agent_from_session_id(source_session_id)
         new_session_id = f"{node_type}_session_{uuid.uuid4().hex[:8]}"
+        src = self._resolve_existing_path(source_session_id)
+        if src is None:
+            raise FileNotFoundError(f"Source session not found: {source_session_id}")
 
-        source_db_path = os.path.join(self.session_dir, f"{source_session_id}.db")
-        if not os.path.exists(source_db_path):
-            raise FileNotFoundError(f"Source session database not found: {source_session_id}")
-
-        # Read source messages ordered by creation time
-        with sqlite3.connect(source_db_path, timeout=5.0) as src_conn:
-            cursor = src_conn.cursor()
-            cursor.execute(
-                "SELECT id, session_id, message_data, created_at FROM agent_messages "
-                "WHERE session_id = ? ORDER BY created_at, id",
-                (source_session_id,),
-            )
-            rows = cursor.fetchall()
-
-        # Determine the truncation boundary
-        user_turn_count = 0
-        cutoff_index = len(rows)  # default: keep all
-
-        for i, (_, _, message_data, _) in enumerate(rows):
-            try:
-                msg = json.loads(message_data)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if msg.get("role") == "user":
-                user_turn_count += 1
-                if user_turn_count > up_to_user_turn:
-                    # This user message starts the next turn beyond the requested range
-                    cutoff_index = i
+        items = read_jsonl(src)
+        user_count = 0
+        cutoff = len(items)
+        for idx, item in enumerate(items):
+            if item.get("role") == "user":
+                user_count += 1
+                if user_count > up_to_user_turn:
+                    cutoff = idx
                     break
 
-        # If include_assistant_response is False, cut right after the user turn's own message
-        if not include_assistant_response and user_turn_count >= up_to_user_turn:
-            # Walk backwards from cutoff to find the end of the user turn's user message
-            target_count = 0
-            for i, (_, _, message_data, _) in enumerate(rows):
-                try:
-                    msg = json.loads(message_data)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                if msg.get("role") == "user":
-                    target_count += 1
-                    if target_count == up_to_user_turn:
-                        # Include this user message, but nothing after it
-                        cutoff_index = i + 1
+        if not include_assistant_response and user_count >= up_to_user_turn:
+            target = 0
+            for idx, item in enumerate(items):
+                if item.get("role") == "user":
+                    target += 1
+                    if target == up_to_user_turn:
+                        cutoff = idx + 1
                         break
 
-        kept_rows = rows[:cutoff_index]
-        if not kept_rows:
+        kept = items[:cutoff]
+        if not kept:
             raise ValueError(f"No messages to keep for turn {up_to_user_turn}")
 
-        kept_message_ids = {row[0] for row in kept_rows}
-
-        # Create the new session database
-        new_db_path = os.path.join(self.session_dir, f"{new_session_id}.db")
-        new_session = AdvancedSQLiteSession(session_id=new_session_id, db_path=new_db_path, create_tables=True)
-        # Store in cache
-        self._sessions[new_session_id] = new_session
-
-        # Read turn_usage and message_structure rows for kept turns from source DB.
-        # message_structure must be copied so that AdvancedSQLiteSession.get_items()
-        # (which JOINs agent_messages with message_structure) returns the rewound history.
-        turn_usage_rows: list = []
-        structure_rows: list = []
-        with sqlite3.connect(source_db_path, timeout=5.0) as src_conn:
-            cursor = src_conn.cursor()
-            try:
-                cursor.execute(
-                    "SELECT branch_id, user_turn_number, requests, input_tokens, "
-                    "output_tokens, total_tokens, input_tokens_details, "
-                    "output_tokens_details, created_at "
-                    "FROM turn_usage WHERE session_id = ? AND user_turn_number <= ?",
-                    (source_session_id, up_to_user_turn),
-                )
-                turn_usage_rows = cursor.fetchall()
-            except sqlite3.OperationalError:
-                # turn_usage table may not exist in older databases
-                pass
-
-            try:
-                cursor.execute(
-                    "SELECT message_id, branch_id, message_type, sequence_number, "
-                    "user_turn_number, branch_turn_number, tool_name, created_at "
-                    "FROM message_structure WHERE session_id = ? ORDER BY sequence_number",
-                    (source_session_id,),
-                )
-                structure_rows = [row for row in cursor.fetchall() if row[0] in kept_message_ids]
-            except sqlite3.OperationalError:
-                pass
-
-        # Insert session record, messages, message_structure, and turn_usage into the new DB.
-        # Preserve agent_messages.id so message_structure.message_id references remain valid.
-        with sqlite3.connect(new_db_path, timeout=5.0) as new_conn:
-            new_conn.execute(
-                "INSERT OR IGNORE INTO agent_sessions (session_id) VALUES (?)",
-                (new_session_id,),
-            )
-            for msg_id, _, message_data, created_at in kept_rows:
-                new_conn.execute(
-                    "INSERT INTO agent_messages (id, session_id, message_data, created_at) VALUES (?, ?, ?, ?)",
-                    (msg_id, new_session_id, message_data, created_at),
-                )
-            for (
-                message_id,
-                branch_id,
-                message_type,
-                sequence_number,
-                user_turn_number,
-                branch_turn_number,
-                tool_name,
-                created_at,
-            ) in structure_rows:
-                new_conn.execute(
-                    "INSERT INTO message_structure "
-                    "(session_id, message_id, branch_id, message_type, sequence_number, "
-                    "user_turn_number, branch_turn_number, tool_name, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        new_session_id,
-                        message_id,
-                        branch_id,
-                        message_type,
-                        sequence_number,
-                        user_turn_number,
-                        branch_turn_number,
-                        tool_name,
-                        created_at,
-                    ),
-                )
-            for usage_row in turn_usage_rows:
-                new_conn.execute(
-                    "INSERT OR IGNORE INTO turn_usage "
-                    "(session_id, branch_id, user_turn_number, requests, input_tokens, "
-                    "output_tokens, total_tokens, input_tokens_details, "
-                    "output_tokens_details, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_session_id, *usage_row),
-                )
-            new_conn.commit()
-
+        new_path = self._path(new_session_id)
+        write_jsonl(new_path, kept)
+        self._sessions[new_session_id] = SQLiteSession(session_id=new_session_id, db_path=new_path, create_tables=False)
         logger.info(
-            f"Rewound session {source_session_id} to turn {up_to_user_turn} -> new session {new_session_id} "
-            f"({len(kept_rows)} messages copied)"
+            "Rewound %s @ turn %d -> %s (%d items kept)",
+            source_session_id,
+            up_to_user_turn,
+            new_session_id,
+            len(kept),
         )
         return new_session_id
 
-    def list_sessions(self, limit: int = None, sort_by_modified: bool = False) -> list[str]:
-        """
-        List available session IDs.
+    # ------------------------------------------------------------------
+    # Resume rendering
+    # ------------------------------------------------------------------
 
-        Args:
-            limit: Maximum number of sessions to return (None for all)
-            sort_by_modified: If True, sort by file modification time (newest first). Defaults to False.
+    def get_session_messages(self, session_id: str) -> List[Dict[str, Any]]:
+        if not self._SESSION_ID_RE.fullmatch(session_id):
+            logger.warning("Invalid session_id format: %s", session_id)
+            return []
 
-        Returns:
-            List of session IDs sorted by modification time (newest first) if sort_by_modified is True
-        """
-        # Check for existing database files
-        session_ids = []
-        if os.path.exists(self.session_dir):
-            if sort_by_modified:
-                # Get files with modification times
-                files_with_mtime = []
-                for filename in os.listdir(self.session_dir):
-                    if filename.endswith(".db"):
-                        filepath = os.path.join(self.session_dir, filename)
-                        try:
-                            mtime = os.path.getmtime(filepath)
-                            session_id = filename[:-3]  # Remove .db extension
-                            files_with_mtime.append((session_id, mtime))
-                        except OSError:
-                            continue
-
-                # Sort by modification time (newest first) and extract session IDs
-                files_with_mtime.sort(key=lambda x: x[1], reverse=True)
-                session_ids = [sid for sid, _ in files_with_mtime]
-
-                # Apply limit if specified
-                if limit is not None:
-                    session_ids = session_ids[:limit]
-            else:
-                for filename in os.listdir(self.session_dir):
-                    if filename.endswith(".db"):
-                        session_id = filename[:-3]  # Remove .db extension
-                        session_ids.append(session_id)
-
-                        # Apply limit if specified
-                        if limit is not None and len(session_ids) >= limit:
-                            break
-
-        return session_ids
-
-    def session_exists(self, session_id: str) -> bool:
-        """
-        Check if a session exists and has actual data.
-
-        Args:
-            session_id: Session ID to check
-
-        Returns:
-            True if session exists and has data, False otherwise
-        """
-        self._validate_session_id(session_id)
-        # Check if database file exists first (avoid listing all sessions)
-        db_path = os.path.join(self.session_dir, f"{session_id}.db")
-        if not os.path.exists(db_path):
-            return False
-
-        # Check if the session has actual data (messages or session record)
+        path = self._resolve_existing_path(session_id)
+        if path is None:
+            return []
+        # Prevent path traversal: ensure the resolved file lives inside
+        # ``session_dir`` (paranoid, since we built the path ourselves).
+        sessions_root = Path(self.session_dir).resolve()
         try:
-            with sqlite3.connect(db_path, timeout=5.0) as conn:
-                cursor = conn.cursor()
+            Path(path).resolve().relative_to(sessions_root)
+        except ValueError:
+            logger.warning("Session path traversal attempt: %s", path)
+            return []
 
-                # Check if session has any messages
-                cursor.execute(
-                    "SELECT COUNT(*) FROM agent_messages WHERE session_id = ?",
-                    (session_id,),
-                )
-                message_count = cursor.fetchone()[0]
+        rows = read_jsonl(path)
+        out: List[Dict[str, Any]] = []
+        current_assistant: Optional[Dict[str, Any]] = None
+        current_actions: List[ActionHistory] = []
+        progress: List[str] = []
 
-                if message_count > 0:
-                    return True
+        for msg in rows:
+            role = msg.get("role")
+            msg_type = msg.get("type")
+            created_at = msg.get("created_at") or msg.get("timestamp")
 
-                # Check if session has a record in agent_sessions
-                cursor.execute(
-                    "SELECT COUNT(*) FROM agent_sessions WHERE session_id = ?",
-                    (session_id,),
-                )
-                session_count = cursor.fetchone()[0]
+            if role == "user":
+                if current_assistant is not None:
+                    self._finalize_assistant(out, current_assistant, current_actions, progress)
+                    current_assistant = None
+                    current_actions = []
+                    progress = []
+                content = extract_user_input(msg.get("content", ""))
+                out.append({"role": "user", "content": content, "timestamp": created_at, "created_at": created_at})
+                continue
 
-                return session_count > 0
-
-        except Exception as e:
-            logger.debug(f"Error checking session existence for {session_id}: {e}")
-            return False
-
-    def get_session_info(self, session_id: str) -> Dict[str, Any]:
-        """
-        Get information about a session.
-
-        Args:
-            session_id: Session ID to get info for
-
-        Returns:
-            Dictionary with session information including timestamps, file size, etc.
-        """
-        self._validate_session_id(session_id)
-        db_path = os.path.join(self.session_dir, f"{session_id}.db")
-
-        # Check if database file exists first
-        if not os.path.exists(db_path):
-            return {"exists": False}
-
-        # Get basic file information
-        file_info = {}
-        try:
-            if os.path.exists(db_path):
-                stat = os.stat(db_path)
-                file_info = {
-                    "file_size": stat.st_size,
-                    "file_modified": stat.st_mtime,
-                }
-        except Exception as e:
-            logger.debug(f"Could not get file info for {db_path}: {e}")
-
-        # Get all session data from database in efficient queries
-        try:
-            with sqlite3.connect(db_path, timeout=5.0) as conn:
-                cursor = conn.cursor()
-
-                # Get session metadata
-                cursor.execute(
-                    """
-                    SELECT created_at, updated_at
-                    FROM agent_sessions
-                    WHERE session_id = ?
-                    """,
-                    (session_id,),
-                )
-                session_row = cursor.fetchone()
-
-                if session_row:
-                    session_metadata = {
-                        "created_at": session_row[0],
-                        "updated_at": session_row[1],
-                    }
-                else:
-                    session_metadata = {}
-
-                # Aggregate total_tokens from turn_usage table
+            if msg_type == "function_call":
+                if current_assistant is None:
+                    current_assistant = self._new_assistant_group(created_at)
+                tool_name = msg.get("name", "unknown")
+                arguments = msg.get("arguments", "{}")
                 try:
-                    cursor.execute(
-                        "SELECT COALESCE(SUM(total_tokens), 0) FROM turn_usage WHERE session_id = ?",
-                        (session_id,),
+                    args_dict = json.loads(arguments) if arguments else {}
+                    progress.append(f"✓ Tool call: {tool_name}({str(args_dict)[:60]})")
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    progress.append(f"✓ Tool call: {tool_name}")
+                current_actions.append(
+                    ActionHistory(
+                        action_id=msg.get("call_id", str(uuid.uuid4())),
+                        role=ActionRole.TOOL,
+                        messages=f"Tool call: {tool_name}",
+                        action_type=tool_name,
+                        input={"function_name": tool_name, "arguments": arguments},
+                        output=None,
+                        status=ActionStatus.PROCESSING,
+                        start_time=_parse_ts(created_at),
                     )
-                    session_metadata["total_tokens"] = cursor.fetchone()[0]
-                except sqlite3.OperationalError:
-                    session_metadata["total_tokens"] = 0
-
-                # Get message statistics in one query
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) as message_count, MAX(created_at) as latest_message_at
-                    FROM agent_messages
-                    WHERE session_id = ?
-                    """,
-                    (session_id,),
                 )
-                message_stats = cursor.fetchone()
-                if message_stats:
-                    session_metadata.update(
-                        {
-                            "message_count": message_stats[0] or 0,
-                            "item_count": message_stats[0] or 0,  # Same as message_count
-                            "latest_message_at": message_stats[1],
-                        }
-                    )
+                continue
 
-                # Get latest user message (need to check all messages to find the most recent user message)
-                cursor.execute(
-                    """
-                    SELECT message_data, created_at
-                    FROM agent_messages
-                    WHERE session_id = ?
-                    ORDER BY created_at DESC
-                    """,
-                    (session_id,),
-                )
-                all_messages = cursor.fetchall()
-
-                latest_user_message = None
-                latest_user_message_at = None
-
-                # Find the latest user message by scanning through all messages
-                for message_data, created_at in all_messages:
+            if msg_type == "function_call_output":
+                if not current_actions:
+                    continue
+                target = self._match_pending_call(current_actions, msg.get("call_id"))
+                output_text = msg.get("output", "")
+                output_data: Any = {}
+                if output_text:
                     try:
-                        message_json = json.loads(message_data)
-                        role = message_json.get("role", "")
-
-                        # Find latest user message (extract original user input from structured content)
-                        if role == "user" and latest_user_message is None:
-                            content = extract_user_input(message_json.get("content", ""))
-                            latest_user_message = content
-                            latest_user_message_at = created_at
-                            break  # Found the latest user message, no need to continue
-
-                    except (json.JSONDecodeError, TypeError):
-                        # Skip malformed messages
-                        continue
-
-                # Find the first user message (by ASC order)
-                first_user_message = None
-                first_user_message_at = None
-                for message_data, created_at in reversed(all_messages):
-                    try:
-                        message_json = json.loads(message_data)
-                        role = message_json.get("role", "")
-                        if role == "user":
-                            content = extract_user_input(message_json.get("content", ""))
-                            first_user_message = content
-                            first_user_message_at = created_at
-                            break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-
-                session_metadata.update(
-                    {
-                        "latest_user_message": latest_user_message,
-                        "latest_user_message_at": latest_user_message_at,
-                        "first_user_message": first_user_message,
-                        "first_user_message_at": first_user_message_at,
-                    }
-                )
-
-        except Exception as e:
-            logger.debug(f"Could not get session metadata for {session_id}: {e}")
-            # Return basic info even if database query fails
-            session_metadata = {"total_tokens": 0, "message_count": 0, "item_count": 0}
-
-        return {
-            "exists": True,
-            "session_id": session_id,
-            "db_path": db_path,
-            **file_info,
-            **session_metadata,
-        }
-
-    def get_detailed_usage(self, session_id: str) -> Dict[str, Any]:
-        """Query turn_usage table and return aggregated + per-turn token usage."""
-        self._validate_session_id(session_id)
-        db_path = os.path.join(self.session_dir, f"{session_id}.db")
-        empty_result = {
-            "total": {"requests": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cached_tokens": 0},
-            "turns": [],
-            "turn_count": 0,
-        }
-        if not os.path.exists(db_path):
-            return empty_result
-
-        total = {
-            "requests": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cached_tokens": 0,
-        }
-        turns: List[Dict[str, Any]] = []
-
-        try:
-            with sqlite3.connect(db_path, timeout=5.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT user_turn_number, requests, input_tokens, output_tokens, "
-                    "total_tokens, input_tokens_details, output_tokens_details, created_at "
-                    "FROM turn_usage WHERE session_id = ? ORDER BY user_turn_number",
-                    (session_id,),
-                )
-                for row in cursor.fetchall():
-                    turn_number, requests, inp, out, tot, inp_details, out_details, created_at = row
-                    total["requests"] += requests or 0
-                    total["input_tokens"] += inp or 0
-                    total["output_tokens"] += out or 0
-                    total["total_tokens"] += tot or 0
-
-                    # Parse JSON detail fields
-                    inp_detail_dict = {}
-                    out_detail_dict = {}
-                    if inp_details:
-                        try:
-                            inp_detail_dict = json.loads(inp_details)
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                    if out_details:
-                        try:
-                            out_detail_dict = json.loads(out_details)
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-
-                    cached = inp_detail_dict.get("cached_tokens", 0)
-                    total["cached_tokens"] += cached or 0
-
-                    turns.append(
-                        {
-                            "turn_number": turn_number,
-                            "requests": requests or 0,
-                            "input_tokens": inp or 0,
-                            "output_tokens": out or 0,
-                            "total_tokens": tot or 0,
-                            "input_tokens_details": inp_detail_dict,
-                            "output_tokens_details": out_detail_dict,
-                            "created_at": created_at,
-                        }
+                        output_data = json.loads(output_text)
+                    except (TypeError, json.JSONDecodeError):
+                        output_data = {"result": output_text}
+                target_id = target.action_id if target else str(uuid.uuid4())
+                current_actions.append(
+                    ActionHistory(
+                        action_id="complete_" + target_id,
+                        role=ActionRole.TOOL,
+                        messages=f"Tool result: {target.action_type if target else 'tool'}",
+                        action_type=target.action_type if target else "tool",
+                        input=target.input if target else None,
+                        output=output_data,
+                        status=ActionStatus.SUCCESS,
+                        start_time=target.start_time if target else _parse_ts(created_at),
+                        end_time=_parse_ts(created_at),
                     )
-        except sqlite3.OperationalError:
-            logger.debug(f"turn_usage table not found for session {session_id}")
+                )
+                if target is not None:
+                    target.status = ActionStatus.SUCCESS
+                    target.end_time = _parse_ts(created_at)
+                continue
 
-        return {"total": total, "turns": turns, "turn_count": len(turns)}
+            if role == "assistant":
+                if current_assistant is None:
+                    current_assistant = self._new_assistant_group(created_at)
+                content = msg.get("content")
+                texts: List[str] = []
+                if isinstance(content, str):
+                    texts.append(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            text = item.get("text") or item.get("output_text")
+                            if text:
+                                texts.append(text)
+                for text in texts:
+                    progress.append(f"💭Thinking: {text}")
+                    current_actions.append(
+                        ActionHistory(
+                            action_id=msg.get("id", str(uuid.uuid4())),
+                            role=ActionRole.ASSISTANT,
+                            messages=text,
+                            action_type="thinking",
+                            input=None,
+                            output={"raw_output": text},
+                            status=ActionStatus.SUCCESS,
+                            start_time=_parse_ts(created_at),
+                            end_time=_parse_ts(created_at),
+                        )
+                    )
+
+        if current_assistant is not None:
+            self._finalize_assistant(out, current_assistant, current_actions, progress)
+
+        return out
+
+    # ------------------------------------------------------------------
+    # Bookkeeping
+    # ------------------------------------------------------------------
+
+    def close_all_sessions(self) -> None:
+        for sid in list(self._sessions.keys()):
+            self._sessions.pop(sid, None)
+            logger.debug("Closed session: %s", sid)
 
     @staticmethod
-    def _parse_final_output(actions: List[ActionHistory], current_assistant_group: Dict) -> Optional[ActionHistory]:
-        """Try to parse sql/output from the last assistant action's messages and update assistant group.
+    def _new_assistant_group(created_at: Optional[str]) -> Dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": "",
+            "timestamp": created_at,
+            "created_at": created_at,
+        }
 
-        Searches *actions* in reverse for the last ASSISTANT action and attempts
-        to extract structured JSON (sql/output).  When JSON extraction fails
-        (e.g. chat agent producing plain markdown), the raw text is used as
-        ``content`` so it can be rendered as markdown during resume.
-        """
-        # Find last assistant action (may not be the very last action)
+    @staticmethod
+    def _match_pending_call(actions: List[ActionHistory], call_id: Optional[str]) -> Optional[ActionHistory]:
+        if call_id:
+            for candidate in reversed(actions):
+                if candidate.action_id == call_id and candidate.status == ActionStatus.PROCESSING:
+                    return candidate
+        for candidate in reversed(actions):
+            if candidate.role == ActionRole.TOOL and candidate.status == ActionStatus.PROCESSING:
+                return candidate
+        return None
+
+    @classmethod
+    def _finalize_assistant(
+        cls,
+        out: List[Dict[str, Any]],
+        group: Dict[str, Any],
+        actions: List[ActionHistory],
+        progress: List[str],
+    ) -> None:
+        final = cls._parse_final_output(actions, group)
+        if final is not None:
+            actions = list(actions) + [final]
+        if not group.get("content"):
+            group["content"] = "Processing completed"
+        if progress:
+            group["progress_messages"] = list(progress)
+        if actions:
+            group["actions"] = list(actions)
+        out.append(group)
+
+    @staticmethod
+    def _parse_final_output(actions: List[ActionHistory], group: Dict[str, Any]) -> Optional[ActionHistory]:
         last_assistant = None
         for action in reversed(actions):
             if action.role == ActionRole.ASSISTANT:
                 last_assistant = action
                 break
-
-        if not last_assistant or not last_assistant.messages:
+        if last_assistant is None or not last_assistant.messages:
             return None
-
         result_json = llm_result2json(last_assistant.messages)
         if isinstance(result_json, str):
-            # Plain string output — use directly as content
-            current_assistant_group["content"] = result_json
+            group["content"] = result_json
             return None
         if isinstance(result_json, dict) and (
             "sql" in result_json or "output" in result_json or "response" in result_json
         ):
-            output = {}
-            if "sql" in result_json:
-                output["sql"] = result_json["sql"]
-            # Treat "response" as alias for "output" (prefer "response" if present)
             content_value = result_json.get("response") or result_json.get("output", "")
-            output["response"] = content_value
-            current_assistant_group["content"] = content_value
-            current_assistant_group["sql"] = result_json.get("sql", "")
-            # Create final action
-            final_action = ActionHistory.create_action(
+            group["content"] = content_value
+            group["sql"] = result_json.get("sql", "")
+            return ActionHistory.create_action(
                 role=ActionRole.ASSISTANT,
                 action_type="chat_response",
                 messages="Chat interaction completed successfully",
                 input_data={},
-                output_data=output,
+                output_data={"sql": result_json.get("sql", ""), "response": content_value},
                 status=ActionStatus.SUCCESS,
             )
-            return final_action
-
-        # Non-JSON output (e.g. chat agent markdown) — use raw text as content
-        current_assistant_group["content"] = last_assistant.messages
+        group["content"] = last_assistant.messages
         return None
 
-    def get_session_messages(self, session_id: str) -> List[Dict]:
-        """
-        Get all messages from a session stored in SQLite, aggregating consecutive assistant messages.
 
-        Args:
-            session_id: Session ID to load messages from
-
-        Returns:
-            List of message dictionaries with role, content, timestamp, SQL, and progress
-        """
-        messages = []
-
-        # Validate session_id to prevent path traversal
-        if not self._SESSION_ID_RE.fullmatch(session_id):
-            logger.warning(f"Invalid session_id format (potential path traversal): {session_id}")
-            return messages
-
-        # Build path with pathlib and resolve to absolute path
-        sessions_dir = Path(self.session_dir)
-        db_path = (sessions_dir / f"{session_id}.db").resolve()
-
-        # Ensure resolved path is within sessions directory
-        try:
-            db_path.relative_to(sessions_dir.resolve())
-        except ValueError:
-            logger.warning(f"Session path outside of sessions directory (path traversal attempt): {db_path}")
-            return messages
-
-        if not db_path.exists():
-            logger.warning(f"Session database not found: {db_path}")
-            return messages
-
-        try:
-            with sqlite3.connect(str(db_path)) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT message_data, created_at
-                    FROM agent_messages
-                    WHERE session_id = ?
-                    ORDER BY created_at, id
-                    """,
-                    (session_id,),
-                )
-
-                # Aggregate consecutive assistant messages
-                current_assistant_group = None
-                assistant_progress = []
-                current_actions = []  # Collect ActionHistory objects for detailed view
-
-                for message_data, created_at in cursor.fetchall():
-                    try:
-                        message_json = json.loads(message_data)
-                        role = message_json.get("role", "")
-                        msg_type = message_json.get("type", "")
-
-                        # Handle user messages
-                        if role == "user":
-                            # Before adding user message, flush any pending assistant group
-                            if current_assistant_group:
-                                final_action = self._parse_final_output(current_actions, current_assistant_group)
-                                if final_action:
-                                    current_actions.append(final_action)
-
-                                # Add collected actions and progress to the assistant group
-                                if current_actions:
-                                    current_assistant_group["actions"] = current_actions.copy()
-                                if assistant_progress:
-                                    current_assistant_group["progress_messages"] = assistant_progress.copy()
-
-                                messages.append(current_assistant_group)
-                                current_assistant_group = None
-                                assistant_progress = []
-                                current_actions = []
-
-                            # Add user message (extract original user input from structured content)
-                            content = extract_user_input(message_json.get("content", ""))
-                            messages.append(
-                                {"role": "user", "content": content, "timestamp": created_at, "created_at": created_at}
-                            )
-                            continue
-
-                        # Handle function calls (tool calls)
-                        if msg_type == "function_call":
-                            tool_name = message_json.get("name", "unknown")
-                            arguments = message_json.get("arguments", "{}")
-
-                            # Initialize assistant group if needed
-                            if not current_assistant_group:
-                                current_assistant_group = {
-                                    "role": "assistant",
-                                    "content": "",
-                                    "timestamp": created_at,
-                                    "created_at": created_at,
-                                }
-
-                            # Parse arguments
-                            try:
-                                args_dict = json.loads(arguments) if arguments else {}
-                                args_str = str(args_dict)[:60]
-                                assistant_progress.append(f"✓ Tool call: {tool_name}({args_str})")
-                            except (json.JSONDecodeError, ValueError, TypeError):
-                                args_dict = {}
-                                assistant_progress.append(f"✓ Tool call: {tool_name}")
-
-                            # Create ActionHistory for tool call (use original call_id from SDK)
-                            action = ActionHistory(
-                                action_id=message_json.get("call_id", str(uuid.uuid4())),
-                                role=ActionRole.TOOL,
-                                messages=f"Tool call: {tool_name}",
-                                action_type=tool_name,
-                                input={"function_name": tool_name, "arguments": arguments},
-                                output=None,  # Will be filled by next function_call_output
-                                status=ActionStatus.PROCESSING,
-                                start_time=datetime.fromisoformat(created_at) if created_at else datetime.now(),
-                            )
-                            current_actions.append(action)
-                            continue
-
-                        # Handle function outputs (tool results)
-                        if msg_type == "function_call_output":
-                            # Create a new SUCCESS action for the tool output
-                            if current_actions:
-                                # Pair with the matching PROCESSING call by call_id so that
-                                # interleaved tool calls (multiple function_call messages
-                                # before any output) are matched correctly on resume.
-                                output_call_id = message_json.get("call_id")
-                                last_action = None
-                                if output_call_id:
-                                    for candidate in reversed(current_actions):
-                                        if (
-                                            candidate.action_id == output_call_id
-                                            and candidate.status == ActionStatus.PROCESSING
-                                        ):
-                                            last_action = candidate
-                                            break
-                                if last_action is None:
-                                    last_action = current_actions[-1]
-
-                                # Extract output directly from message_json
-                                output_text = message_json.get("output", "")
-
-                                # Try to parse as Python literal (the output is stored as string repr of dict)
-                                output_data = {}
-                                if output_text:
-                                    try:
-                                        # Try ast.literal_eval first (safer than eval)
-                                        output_data = ast.literal_eval(output_text)
-                                    except (ValueError, SyntaxError):
-                                        # If that fails, try json.loads
-                                        try:
-                                            output_data = json.loads(output_text)
-                                        except json.JSONDecodeError:
-                                            # Last resort: store as string
-                                            output_data = {"result": output_text}
-
-                                # Create a new SUCCESS action, prefix with "complete_" like openai_compatible.py
-                                call_id = message_json.get("call_id", last_action.action_id)
-                                success_action = ActionHistory(
-                                    action_id="complete_" + call_id,
-                                    role=ActionRole.TOOL,
-                                    messages=f"Tool result: {last_action.action_type}",
-                                    action_type=last_action.action_type,
-                                    input=last_action.input,
-                                    output=output_data,
-                                    status=ActionStatus.SUCCESS,
-                                    start_time=last_action.start_time,
-                                    end_time=datetime.fromisoformat(created_at) if created_at else datetime.now(),
-                                )
-                                current_actions.append(success_action)
-                            continue
-
-                        # Handle assistant messages (thinking and final output)
-                        if role == "assistant":
-                            # Assistant message - aggregate consecutive ones
-                            content_array = message_json.get("content", [])
-
-                            for item in content_array:
-                                if not isinstance(item, dict):
-                                    continue
-
-                                item_type = item.get("type", "")
-                                text = item.get("text", "")
-
-                                if item_type == "output_text" and text:
-                                    # Initialize assistant group if needed
-                                    if not current_assistant_group:
-                                        current_assistant_group = {
-                                            "role": "assistant",
-                                            "content": "",
-                                            "timestamp": created_at,
-                                            "created_at": created_at,
-                                        }
-
-                                    # Add to progress
-                                    assistant_progress.append(f"💭Thinking: {text}")
-
-                                    # Create ActionHistory for thinking (use response_id from provider)
-                                    response_id = message_json.get("provider_data", {}).get(
-                                        "response_id", message_json.get("id", str(uuid.uuid4()))
-                                    )
-                                    thinking_action = ActionHistory(
-                                        action_id=response_id,
-                                        role=ActionRole.ASSISTANT,
-                                        messages=text,
-                                        action_type="thinking",
-                                        input=None,
-                                        output={"raw_output": text},
-                                        status=ActionStatus.SUCCESS,
-                                        start_time=(
-                                            datetime.fromisoformat(created_at) if created_at else datetime.now()
-                                        ),
-                                        end_time=(datetime.fromisoformat(created_at) if created_at else datetime.now()),
-                                    )
-                                    current_actions.append(thinking_action)
-
-                    except (json.JSONDecodeError, TypeError) as e:
-                        logger.debug(f"Skipping malformed message: {e}")
-                        continue
-
-                # Flush any remaining assistant group
-                if current_assistant_group:
-                    final_action = self._parse_final_output(current_actions, current_assistant_group)
-                    if final_action:
-                        current_actions.append(final_action)
-
-                    if not current_assistant_group.get("content"):
-                        current_assistant_group["content"] = "Processing completed"
-                    if assistant_progress:
-                        current_assistant_group["progress_messages"] = assistant_progress
-                    if current_actions:
-                        current_assistant_group["actions"] = current_actions.copy()
-                    messages.append(current_assistant_group)
-
-        except Exception as e:
-            logger.exception(f"Failed to load session messages for {session_id}: {e}")
-
-        return messages
-
-    def close_all_sessions(self) -> None:
-        """Close all active sessions."""
-        for session_id in list(self._sessions.keys()):
-            self._sessions.pop(session_id)
-            # SQLiteSession doesn't have an explicit close method,
-            # but removing it from our dict should handle cleanup
-            logger.debug(f"Closed session: {session_id}")
+def _parse_ts(raw: Optional[str]) -> datetime:
+    if not raw:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.now()

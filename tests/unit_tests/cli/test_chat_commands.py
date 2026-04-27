@@ -122,41 +122,20 @@ def _create_session_on_disk(session_id, messages=None):
 
     sessions_dir = str(get_path_manager().sessions_dir)
     os.makedirs(sessions_dir, exist_ok=True)
-    db_path = os.path.join(sessions_dir, f"{session_id}.db")
+    file_path = os.path.join(sessions_dir, f"{session_id}.jsonl")
 
     if messages is None:
         messages = [("user", "Hello"), ("assistant", "Hi there!")]
 
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_sessions ("
-            "session_id TEXT PRIMARY KEY, "
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
-            "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-        )
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_messages ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "session_id TEXT NOT NULL, "
-            "message_data TEXT NOT NULL, "
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO agent_sessions (session_id) VALUES (?)",
-            (session_id,),
-        )
-
-        base_time = datetime(2025, 6, 1, 10, 0, 0)
+    base_time = datetime(2025, 6, 1, 10, 0, 0)
+    with open(file_path, "w", encoding="utf-8") as fh:
         for i, (role, content) in enumerate(messages):
             ts = (base_time + timedelta(minutes=i)).isoformat()
-            msg_data = json.dumps({"role": role, "content": content})
-            conn.execute(
-                "INSERT INTO agent_messages (session_id, message_data, created_at) VALUES (?, ?, ?)",
-                (session_id, msg_data, ts),
-            )
-        conn.commit()
+            payload = {"role": role, "content": content, "created_at": ts}
+            fh.write(json.dumps(payload, ensure_ascii=False))
+            fh.write("\n")
 
-    return db_path
+    return file_path
 
 
 # ===========================================================================

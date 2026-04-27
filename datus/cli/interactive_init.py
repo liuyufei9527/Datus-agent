@@ -531,16 +531,16 @@ class InteractiveInit:
                 default_headers=probe.get("default_headers"),
             )
 
-            from datus.models.base import LLMBaseModel
+            from datus.models.registry import resolve_model_class
 
-            model_type = model_config.type
-            class_name = LLMBaseModel.MODEL_TYPE_MAP.get(model_type)
-            if not class_name:
-                error_msg = f"Unsupported model type: {model_type}"
+            try:
+                module_path, class_name = resolve_model_class(model_config.type)
+            except KeyError as exc:
+                error_msg = str(exc)
                 logger.error(error_msg)
                 return False, error_msg
 
-            module = __import__(f"datus.models.{model_type}_model", fromlist=[class_name])
+            module = __import__(module_path, fromlist=[class_name])
             model_class = getattr(module, class_name)
             llm_model = model_class(model_config=model_config)
 

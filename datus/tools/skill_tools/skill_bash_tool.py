@@ -18,8 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, List
 
-from agents import Tool
-
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool
 from datus.tools.skill_tools.skill_config import SkillMetadata
 

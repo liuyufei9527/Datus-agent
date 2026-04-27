@@ -15,10 +15,14 @@ import json
 import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from agents import Agent, RunContextWrapper, Usage
-from agents.mcp import MCPServerStdioParams
-from agents.mcp.server import MCPServerSse, MCPServerSseParams, MCPServerStreamableHttp, MCPServerStreamableHttpParams
-
+from datus.models import Agent, RunContextWrapper, Usage
+from datus.models.mcp_client import (
+    MCPServerSse,
+    MCPServerSseParams,
+    MCPServerStdioParams,
+    MCPServerStreamableHttp,
+    MCPServerStreamableHttpParams,
+)
 from datus.tools.mcp_tools.mcp_config import (
     AnyMCPServerConfig,
     MCPConfig,
@@ -494,7 +498,7 @@ class MCPManager:
 
     async def _handle_list_tools(self, server_instance, server_name: str, run_context, agent):
         """Handle list_tools operation."""
-        tools = await server_instance.list_tools(run_context, agent)
+        tools = await server_instance.list_tools()
         tools_list = []
 
         if tools:
@@ -547,7 +551,7 @@ class MCPManager:
 
         if hasattr(server_instance, "list_tools"):
             try:
-                tools = await server_instance.list_tools(run_context, agent)
+                tools = await server_instance.list_tools()
                 tool_count = len(tools) if tools else 0
                 tool_names = [tool.name for tool in tools] if tools else []
 

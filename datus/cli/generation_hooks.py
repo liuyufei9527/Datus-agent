@@ -12,11 +12,11 @@ from datetime import datetime
 from typing import Optional
 
 import yaml
-from agents.lifecycle import AgentHooks
 from datus_storage_base.conditions import And, eq
 
 from datus.cli.execution_state import InteractionBroker, InteractionCancelled
 from datus.configuration.agent_config import AgentConfig
+from datus.models.hooks import AgentHooks
 from datus.schemas.interaction_event import InteractionEvent
 from datus.storage.metric.store import MetricRAG
 from datus.storage.reference_sql.store import ReferenceSqlRAG

@@ -4,9 +4,8 @@
 
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
-from agents import Tool
-
 from datus.models.base import LLMBaseModel
+from datus.models.tool import Tool
 from datus.prompts.prompt_manager import get_prompt_manager
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager
 from datus.utils.loggings import get_logger

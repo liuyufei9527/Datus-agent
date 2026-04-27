@@ -37,9 +37,8 @@ from datus.cli.service_client import ServiceClient, ServiceClientRegistry, servi
 from datus.utils.loggings import get_logger
 
 if TYPE_CHECKING:
-    from agents import FunctionTool
-
     from datus.cli.repl import DatusCLI
+    from datus.models.tool import FunctionTool
 
 logger = get_logger(__name__)
 

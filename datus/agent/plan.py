@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import List, Optional
 
 import yaml
-from agents import Tool
 
 from datus.agent.node import Node
 from datus.agent.workflow import Workflow
 from datus.configuration.agent_config import AgentConfig
 from datus.configuration.node_type import NodeType
+from datus.models.tool import Tool
 from datus.schemas.node_models import SqlTask
 from datus.schemas.schema_linking_node_models import SchemaLinkingInput
 from datus.utils.loggings import get_logger

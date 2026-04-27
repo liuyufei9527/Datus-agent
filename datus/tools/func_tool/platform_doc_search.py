@@ -4,9 +4,8 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional
 
-from agents import Tool
-
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool
 from datus.utils.loggings import get_logger
 

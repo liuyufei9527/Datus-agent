@@ -380,9 +380,9 @@ def _make_mock_llm_module(model_class_name: str, llm_instance):
     """Inject a fake model module into sys.modules so __import__ in _generate_with_llm works."""
     import sys
 
-    module_name = "datus.models.openai_model"
+    module_name = "datus.models.openai_compatible"
     mock_mod = MagicMock()
-    setattr(mock_mod, model_class_name, MagicMock(return_value=llm_instance))
+    mock_mod.OpenAICompatibleModel = MagicMock(return_value=llm_instance)
     sys.modules[module_name] = mock_mod
     return module_name
 
@@ -404,9 +404,9 @@ class TestInitWorkspaceGenerateWithLLM:
         """Inject a fake datus.models.{model_type}_model module into sys.modules."""
         import sys
 
-        module_name = f"datus.models.{model_type}_model"
+        module_name = "datus.models.openai_compatible"
         mock_mod = MagicMock()
-        setattr(mock_mod, model_class_name, MagicMock(return_value=llm_instance))
+        mock_mod.OpenAICompatibleModel = MagicMock(return_value=llm_instance)
         sys.modules[module_name] = mock_mod
         return module_name
 
@@ -427,7 +427,10 @@ class TestInitWorkspaceGenerateWithLLM:
             mock_agent_config = MagicMock()
             mock_agent_config.active_model.return_value = mock_model_config
 
-            with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}):
+            with patch(
+                "datus.cli.init_workspace.resolve_model_class",
+                return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+            ):
                 result = iw._generate_with_llm(mock_agent_config, "./\n  main.py", "Python", "No services\n")
         finally:
             sys.modules.pop(module_name, None)
@@ -452,7 +455,10 @@ class TestInitWorkspaceGenerateWithLLM:
             mock_agent_config = MagicMock()
             mock_agent_config.active_model.return_value = mock_model_config
 
-            with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}):
+            with patch(
+                "datus.cli.init_workspace.resolve_model_class",
+                return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+            ):
                 result = iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n")
         finally:
             sys.modules.pop(module_name, None)
@@ -469,7 +475,7 @@ class TestInitWorkspaceGenerateWithLLM:
         mock_agent_config = MagicMock()
         mock_agent_config.active_model.return_value = mock_model_config
 
-        with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {}):
+        with patch("datus.cli.init_workspace.resolve_model_class", side_effect=KeyError("Unsupported model type")):
             result = iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n")
 
         assert result is None
@@ -504,7 +510,10 @@ class TestInitWorkspaceGenerateWithLLM:
             mock_agent_config = MagicMock()
             mock_agent_config.active_model.return_value = mock_model_config
 
-            with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}):
+            with patch(
+                "datus.cli.init_workspace.resolve_model_class",
+                return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+            ):
                 iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n")
         finally:
             sys.modules.pop(module_name, None)
@@ -533,7 +542,10 @@ class TestInitWorkspaceGenerateWithLLM:
 
             db_schema = "Database 'mydb' (sqlite) — 3 tables:\n  - orders\n  - users\n  - products\n"
 
-            with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}):
+            with patch(
+                "datus.cli.init_workspace.resolve_model_class",
+                return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+            ):
                 iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n", db_schema)
         finally:
             sys.modules.pop(module_name, None)
@@ -558,7 +570,10 @@ class TestInitWorkspaceGenerateWithLLM:
             mock_agent_config = MagicMock()
             mock_agent_config.active_model.return_value = mock_model_config
 
-            with patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}):
+            with patch(
+                "datus.cli.init_workspace.resolve_model_class",
+                return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+            ):
                 result = iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n")
         finally:
             sys.modules.pop(module_name, None)
@@ -596,7 +611,10 @@ class TestInitWorkspaceGenerateWithLLM:
                 return real_open(path, *a, **kw)
 
             with (
-                patch("datus.models.base.LLMBaseModel.MODEL_TYPE_MAP", {"openai": "OpenAIModel"}),
+                patch(
+                    "datus.cli.init_workspace.resolve_model_class",
+                    return_value=("datus.models.openai_compatible", "OpenAICompatibleModel"),
+                ),
                 patch("builtins.open", side_effect=open_that_fails_for_readme),
             ):
                 result = iw._generate_with_llm(mock_agent_config, "./", "Python", "No services\n")

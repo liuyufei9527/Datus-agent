@@ -4,12 +4,11 @@
 import json
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-from agents import Tool
-
 from datus.agent.node import Node
 from datus.agent.workflow import Workflow
 from datus.configuration.agent_config import AgentConfig
 from datus.models.base import LLMBaseModel
+from datus.models.tool import Tool
 from datus.prompts.gen_sql import get_sql_prompt
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.schemas.node_models import GenerateSQLInput, GenerateSQLResult, SQLContext, SqlTask, TableSchema, TableValue

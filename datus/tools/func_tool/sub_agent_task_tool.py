@@ -18,10 +18,9 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
-from agents import FunctionTool, Tool
-
 from datus.configuration.agent_config import AgentConfig
 from datus.configuration.node_type import NodeType
+from datus.models.tool import FunctionTool, Tool
 from datus.schemas.action_history import (
     SUBAGENT_COMPLETE_ACTION_TYPE,
     ActionHistory,

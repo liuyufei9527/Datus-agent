@@ -12,9 +12,8 @@ Tools delegate to registered semantic adapters while leveraging unified storage 
 import json
 from typing import List, Optional
 
-from agents import Tool
-
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.storage.metric.store import MetricRAG
 from datus.storage.semantic_model.store import SemanticModelRAG
 from datus.tools.func_tool.attribution_utils import DimensionAttributionUtil

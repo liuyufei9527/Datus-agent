@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 from rich.console import Console
 from rich.prompt import Prompt
 
+from datus.models.registry import resolve_model_class
 from datus.utils.loggings import get_logger, print_rich_exception
 
 logger = get_logger(__name__)
@@ -215,16 +216,14 @@ class InitWorkspace:
     ) -> Optional[str]:
         """Use configured LLM to generate AGENTS.md content."""
         try:
-            from datus.models.base import LLMBaseModel
-
             model_config = agent_config.active_model()
-            model_type = model_config.type
-            model_class_name = LLMBaseModel.MODEL_TYPE_MAP.get(model_type)
-            if not model_class_name:
-                logger.warning(f"Unsupported model type: {model_type}")
+            try:
+                module_path, class_name = resolve_model_class(model_config.type)
+            except KeyError as exc:
+                logger.warning("%s", exc)
                 return None
-            module = __import__(f"datus.models.{model_type}_model", fromlist=[model_class_name])
-            model_class = getattr(module, model_class_name)
+            module = __import__(module_path, fromlist=[class_name])
+            model_class = getattr(module, class_name)
             llm = model_class(model_config)
 
             # Read README if exists

@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, Optional
 
-from agents.tool_context import ToolContext
+from datus.models.tool import ToolContext
 
 
 @dataclass

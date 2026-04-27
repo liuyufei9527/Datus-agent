@@ -10,9 +10,10 @@ from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
-from agents import SQLiteSession, Tool
 from pydantic import BaseModel, Field
 
+from datus.models.session import SQLiteSession
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool
 from datus.utils.loggings import get_logger
 

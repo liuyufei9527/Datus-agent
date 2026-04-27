@@ -262,11 +262,11 @@ class TestChatServiceCompactSession:
         assert result.success is True
         assert result.data.success is True
 
-        # The .db file must still exist — compact no longer deletes it.
+        # The session file must still exist — compact no longer deletes it.
         import os
 
-        db_path = os.path.join(svc._session_dir, f"{session_id}.db")
-        assert os.path.exists(db_path), "Session .db must be preserved after compact"
+        db_path = os.path.join(svc._session_dir, f"{session_id}.jsonl")
+        assert os.path.exists(db_path), "Session jsonl must be preserved after compact"
 
         # Re-open the session via a fresh SessionManager to bypass any
         # in-memory caches and verify on-disk state.

@@ -16,14 +16,13 @@ import uuid
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 
-from agents import Tool
-from agents.extensions.memory import AdvancedSQLiteSession
-from agents.mcp import MCPServerStdio
-
 from datus.agent.node.node import Node
 from datus.cli.execution_state import ExecutionInterrupted, InteractionBroker, InterruptController
 from datus.configuration.agent_config import AgentConfig
 from datus.models.base import LLMBaseModel
+from datus.models.mcp_client import MCPServerStdio
+from datus.models.session import SQLiteSession as AdvancedSQLiteSession
+from datus.models.tool import Tool
 from datus.prompts.prompt_manager import get_prompt_manager
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.schemas.base import BaseInput, BaseResult

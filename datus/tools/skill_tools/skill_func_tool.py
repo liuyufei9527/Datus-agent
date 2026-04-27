@@ -12,8 +12,7 @@ from the <available_skills> list in the system prompt.
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
-from agents import Tool
-
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolResult, trans_to_function_tool
 from datus.tools.permission.permission_config import PermissionLevel
 from datus.tools.skill_tools.skill_manager import SkillManager

@@ -8,10 +8,10 @@ from typing import AsyncGenerator, Optional
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from agents.extensions.memory import AdvancedSQLiteSession
 
 from datus.agent.node.agentic_node import AgenticNode
 from datus.configuration.agent_config import AgentConfig
+from datus.models.session import SQLiteSession as AdvancedSQLiteSession
 from datus.schemas.action_history import ActionHistory, ActionHistoryManager, ActionRole, ActionStatus
 from datus.tools.func_tool.sub_agent_task_tool import SubAgentTaskTool
 

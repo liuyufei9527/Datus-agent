@@ -29,8 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from agents.lifecycle import AgentHooks
-
+from datus.models.hooks import AgentHooks
 from datus.utils.loggings import get_logger
 from datus.validation.builtin_checks import run_session_builtin_checks
 from datus.validation.exceptions import ValidationBlockingException

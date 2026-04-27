@@ -7,9 +7,9 @@ import json
 from typing import Any, Dict, List, Optional
 
 import jinja2
-from agents import Tool
 
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.storage.reference_template.store import ReferenceTemplateRAG
 from datus.tools.func_tool.base import FuncToolResult, normalize_null, trans_to_function_tool
 from datus.utils.loggings import get_logger

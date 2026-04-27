@@ -6,12 +6,12 @@ from typing import Any, Dict, List
 import duckdb
 import pytest
 import yaml
-from agents import Tool
 from pydantic import BaseModel, ValidationError
 
 from datus.agent.node import Node
 from datus.configuration.agent_config import AgentConfig
 from datus.configuration.node_type import NodeType
+from datus.models.tool import Tool
 from datus.schemas.base import BaseResult
 from datus.schemas.compare_node_models import CompareInput, CompareResult
 from datus.schemas.doc_search_node_models import DocSearchInput, DocSearchResult

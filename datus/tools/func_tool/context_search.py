@@ -5,9 +5,8 @@
 # -*- coding: utf-8 -*-
 from typing import Any, Dict, List, Literal, Optional
 
-from agents import Tool
-
 from datus.configuration.agent_config import AgentConfig
+from datus.models.tool import Tool
 from datus.schemas.agent_models import SubAgentConfig
 from datus.storage.ext_knowledge.store import ExtKnowledgeRAG
 from datus.storage.metric.store import MetricRAG

@@ -7,9 +7,9 @@ import inspect
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from agents import FunctionTool, function_tool
 from pydantic import BaseModel, Field
 
+from datus.models.tool import FunctionTool, function_tool
 from datus.utils.loggings import get_logger
 
 logger = get_logger(__name__)

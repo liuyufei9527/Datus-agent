@@ -79,33 +79,12 @@ def setup_tracing():
         logger.debug("LangSmith tracing not enabled (set LANGSMITH_TRACING=true and LANGCHAIN_API_KEY to enable)")
         return
 
-    try:
-        from agents import set_trace_processors
-        from langsmith.wrappers import OpenAIAgentsTracingProcessor
-
-        class DatusTracingProcessor(OpenAIAgentsTracingProcessor):
-            """Extended tracing processor that captures trace URLs."""
-
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self._last_trace_url: str | None = None
-
-            def on_trace_end(self, trace) -> None:
-                # Capture trace URL from RunTree before super() pops it
-                run = self._runs.get(trace.trace_id)
-                if run:
-                    try:
-                        self._last_trace_url = run.get_url()
-                        logger.info(f"LangSmith Trace: {self._last_trace_url}")
-                    except Exception as e:
-                        logger.debug(f"Failed to get trace URL: {e}")
-                super().on_trace_end(trace)
-
-        _tracing_processor = DatusTracingProcessor()
-        set_trace_processors([_tracing_processor])
-        logger.info("LangSmith DatusTracingProcessor enabled for SDK tracing")
-    except ImportError:
-        logger.warning("OpenAIAgentsTracingProcessor not available")
+    # The previous integration relied on ``agents.set_trace_processors`` from
+    # openai-agents-sdk. Since that dependency was dropped, in-process LangSmith
+    # tracing is currently a no-op; users who need traces should set up LangSmith
+    # via the standard ``langsmith.trace`` decorators on the call sites that
+    # matter to them. The follow-up native-tracing PR will restore parity here.
+    logger.debug("LangSmith SDK tracing is currently disabled (post-litellm refactor).")
 
 
 def get_trace_url() -> str | None:

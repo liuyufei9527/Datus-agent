@@ -6,10 +6,9 @@
 
 import time
 
-from agents import SQLiteSession
-from agents.lifecycle import AgentHooks
-
 from datus.cli.execution_state import InteractionBroker, InteractionCancelled
+from datus.models.hooks import AgentHooks
+from datus.models.session import SQLiteSession
 from datus.schemas.interaction_event import InteractionEvent
 from datus.utils.loggings import get_logger
 

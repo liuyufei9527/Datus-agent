@@ -23,9 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
-from agents.lifecycle import AgentHooks
-
 from datus.cli.execution_state import InteractionBroker, InteractionCancelled
+from datus.models.hooks import AgentHooks
 from datus.schemas.interaction_event import InteractionEvent
 from datus.tools.func_tool.fs_path_policy import PathZone, classify_path
 from datus.tools.permission.permission_config import PermissionLevel

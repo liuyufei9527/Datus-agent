@@ -9,8 +9,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from agents import Tool
-
+from datus.models.tool import Tool
 from datus.tools.func_tool.base import FuncToolListResult, FuncToolResult, trans_to_function_tool
 from datus.utils.exceptions import DatusException, ErrorCode
 from datus.utils.loggings import get_logger

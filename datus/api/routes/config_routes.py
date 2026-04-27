@@ -16,7 +16,6 @@ from datus.api.deps import AppContextDep, ServiceDep
 from datus.api.models.base_models import Result
 from datus.configuration.agent_config import _SAFE_NAME_RE, DbConfig, load_model_config
 from datus.configuration.agent_config_loader import configuration_manager
-from datus.models.base import LLMBaseModel
 from datus.utils.exceptions import DatusException, ErrorCode
 from datus.utils.loggings import get_logger
 
@@ -65,15 +64,18 @@ class ProbeDatasourceRequest(BaseModel):
 
 def _probe_llm_sync(payload: Dict[str, Any]) -> None:
     """Build a one-shot LLM client from a raw dict and send a tiny probe."""
+    from datus.models.registry import resolve_model_class
+
     model_cfg = load_model_config(payload)
-    model_class_name = LLMBaseModel.MODEL_TYPE_MAP.get(model_cfg.type)
-    if model_class_name is None:
+    try:
+        module_path, class_name = resolve_model_class(model_cfg.type)
+    except KeyError as exc:
         raise DatusException(
             ErrorCode.COMMON_FIELD_INVALID,
-            message=f"Unsupported model type: {model_cfg.type}",
-        )
-    module = __import__(f"datus.models.{model_cfg.type}_model", fromlist=[model_class_name])
-    model_class = getattr(module, model_class_name)
+            message=str(exc),
+        ) from exc
+    module = __import__(module_path, fromlist=[class_name])
+    model_class = getattr(module, class_name)
     client = model_class(model_config=model_cfg)
     client.generate("Hello")
 

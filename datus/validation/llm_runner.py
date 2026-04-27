@@ -331,15 +331,15 @@ async def _build_validator_session(parent_session: Optional[Any], skill_name: st
     if not filtered:
         return None
     try:
-        from datus.models.session_manager import AdvancedSQLiteSession
+        from datus.models.session import SQLiteSession
     except Exception as e:
-        logger.warning("AdvancedSQLiteSession unavailable; skipping validator session fork: %s", e)
+        logger.warning("SQLiteSession unavailable; skipping validator session fork: %s", e)
         return None
     import uuid as _uuid
 
     ephemeral_id = f"validator-{skill_name}-{_uuid.uuid4().hex[:8]}"
     try:
-        session = AdvancedSQLiteSession(session_id=ephemeral_id, db_path=":memory:", create_tables=True)
+        session = SQLiteSession(session_id=ephemeral_id, db_path=":memory:", create_tables=True)
         await session.add_items(filtered)
     except Exception as e:
         logger.warning("Failed to populate validator session for %s: %s", skill_name, e)
