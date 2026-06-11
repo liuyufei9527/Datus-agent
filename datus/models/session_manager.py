@@ -184,6 +184,9 @@ class SessionManager:
         # Remove from in-memory cache if present
         self._sessions.pop(session_id, None)
 
+        # Drop the cached system-prompt snapshot so a fresh node rebuilds it.
+        self.delete_system_prompt_snapshot(session_id)
+
         # Delete the database file and SQLite WAL/SHM files if they exist on disk
         db_path = os.path.join(self.session_dir, f"{session_id}.db")
         if os.path.exists(db_path):
@@ -211,6 +214,72 @@ class SessionManager:
                 logger.debug(f"Deleted session archive dir: {archive_root}")
             except OSError as exc:
                 logger.warning("Failed to remove session archive dir %s: %s", archive_root, exc)
+
+    # ------------------------------------------------------------------
+    # System-prompt snapshot
+    #
+    # The finalized system prompt is byte-stable within a session (datasource
+    # selection and permission profile are injected per-turn in the user
+    # message, not here). Persisting it once and replaying the exact bytes on
+    # every later turn keeps the provider-side prefix cache warm and avoids
+    # re-rendering templates / re-reading AGENTS.md and MEMORY.md each turn.
+    # ------------------------------------------------------------------
+
+    _SNAPSHOT_SCHEMA_VERSION = 1
+
+    def _snapshot_path(self, session_id: str) -> str:
+        """Path of the system-prompt snapshot file for *session_id*."""
+        self._validate_session_id(session_id)
+        return os.path.join(self.session_dir, f"{session_id}.sysprompt.json")
+
+    def save_system_prompt_snapshot(self, session_id: str, prompt: str, meta: Dict[str, Any]) -> None:
+        """Persist the finalized system prompt and its invalidation *meta*.
+
+        Args:
+            session_id: Session the snapshot belongs to.
+            prompt: The fully finalized system-prompt string to replay verbatim.
+            meta: Identity keys that invalidate the snapshot when they change
+                (e.g. ``node_name``, ``prompt_version``, ``model_name``).
+        """
+        payload = {"schema_version": self._SNAPSHOT_SCHEMA_VERSION, "prompt": prompt, **meta}
+        path = self._snapshot_path(session_id)
+        try:
+            # Atomic write so a crash mid-write never leaves a truncated file
+            # that a later turn would replay as a corrupt prefix.
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False)
+            os.replace(tmp_path, path)
+        except OSError as exc:
+            logger.warning("Failed to save system-prompt snapshot for %s: %s", session_id, exc)
+
+    def load_system_prompt_snapshot(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the stored snapshot dict, or ``None`` when absent/unreadable.
+
+        A missing, corrupt, or schema-mismatched file resolves to ``None`` so
+        the caller transparently rebuilds and overwrites it.
+        """
+        path = self._snapshot_path(session_id)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load system-prompt snapshot for %s: %s", session_id, exc)
+            return None
+        if not isinstance(data, dict) or data.get("schema_version") != self._SNAPSHOT_SCHEMA_VERSION:
+            return None
+        return data
+
+    def delete_system_prompt_snapshot(self, session_id: str) -> None:
+        """Remove the system-prompt snapshot file if present (best-effort)."""
+        path = self._snapshot_path(session_id)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as exc:
+                logger.warning("Failed to delete system-prompt snapshot for %s: %s", session_id, exc)
 
     def copy_session(self, source_session_id: str, target_node_name: str) -> str:
         """Copy a session to a new one with a different node-name prefix.

@@ -701,8 +701,13 @@ class TestChatAgenticNodeSystemPrompt:
         assert isinstance(prompt, str)
         assert len(prompt) >= 100
 
-    def test_get_system_prompt_contains_active_permission_profile(self, real_agent_config, mock_llm_create):
-        """Runtime /profile changes must be visible to the next LLM turn."""
+    def test_environment_block_contains_active_permission_profile(self, real_agent_config, mock_llm_create):
+        """Runtime /profile changes must be visible to the next LLM turn.
+
+        The profile is injected per-turn via the ``<environment>`` block (not the
+        cached system prompt) so a mid-session ``/profile`` switch takes effect
+        immediately without invalidating the system-prompt prefix cache.
+        """
         from datus.agent.node.chat_agentic_node import ChatAgenticNode
 
         real_agent_config.active_profile_name = "dangerous"
@@ -713,10 +718,12 @@ class TestChatAgenticNodeSystemPrompt:
             agent_config=real_agent_config,
         )
 
-        prompt = node._get_system_prompt()
+        env_block = node._build_environment_block()
 
-        assert "Current permission profile: dangerous" in prompt
-        assert "authoritative for this turn" in prompt
+        assert "Current permission profile: dangerous" in env_block
+        assert "authoritative for this turn" in env_block
+        # And it must NOT leak into the cached system prompt.
+        assert "Current permission profile" not in node._get_system_prompt()
 
     def test_workflow_prompt_does_not_advertise_ask_user(self, real_agent_config, mock_llm_create):
         """Workflow chat has no ask_user tool, so the prompt must not route to it."""

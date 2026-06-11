@@ -1898,3 +1898,86 @@ class TestSessionMatchesAgent:
         assert session_matches_agent("legacy-id", None) is True
         assert session_matches_agent("legacy-id", "chat") is True
         assert session_matches_agent("legacy-id", "gen_metrics") is False
+
+
+# ===========================================================================
+# TestSystemPromptSnapshot
+# ===========================================================================
+
+
+class TestSystemPromptSnapshot:
+    """Tests for the per-session system-prompt snapshot store."""
+
+    _META = {"node_name": "chat", "prompt_version": "1.2", "model_name": "openai:gpt-4.1"}
+
+    def test_save_then_load_round_trip(self, sm):
+        """A saved snapshot loads back with prompt, schema_version, and meta intact."""
+        sm.save_system_prompt_snapshot("chat_session_a", "SYSTEM PROMPT BODY", self._META)
+
+        loaded = sm.load_system_prompt_snapshot("chat_session_a")
+        assert loaded == {
+            "schema_version": SessionManager._SNAPSHOT_SCHEMA_VERSION,
+            "prompt": "SYSTEM PROMPT BODY",
+            **self._META,
+        }
+
+    def test_load_missing_returns_none(self, sm):
+        """Loading a snapshot that was never written returns None."""
+        assert sm.load_system_prompt_snapshot("chat_session_absent") is None
+
+    def test_snapshot_file_written_alongside_db(self, sm):
+        """The snapshot is persisted as ``{session_id}.sysprompt.json`` in session_dir."""
+        sm.save_system_prompt_snapshot("chat_session_b", "BODY", self._META)
+        path = os.path.join(sm.session_dir, "chat_session_b.sysprompt.json")
+        assert os.path.isfile(path)
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+        assert payload["prompt"] == "BODY"
+
+    def test_save_overwrites_previous_snapshot(self, sm):
+        """A second save replaces the prior snapshot (rebuild path)."""
+        sm.save_system_prompt_snapshot("chat_session_c", "FIRST", self._META)
+        sm.save_system_prompt_snapshot("chat_session_c", "SECOND", self._META)
+        loaded = sm.load_system_prompt_snapshot("chat_session_c")
+        assert loaded["prompt"] == "SECOND"
+
+    def test_corrupt_snapshot_loads_as_none(self, sm):
+        """A truncated/corrupt JSON file resolves to None so the caller rebuilds."""
+        path = os.path.join(sm.session_dir, "chat_session_d.sysprompt.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not valid json")
+        assert sm.load_system_prompt_snapshot("chat_session_d") is None
+
+    def test_schema_version_mismatch_loads_as_none(self, sm):
+        """A snapshot from a different schema version is ignored."""
+        path = os.path.join(sm.session_dir, "chat_session_e.sysprompt.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"schema_version": 999, "prompt": "STALE", **self._META}, fh)
+        assert sm.load_system_prompt_snapshot("chat_session_e") is None
+
+    def test_delete_snapshot_removes_file(self, sm):
+        """delete_system_prompt_snapshot removes the file and is idempotent."""
+        sm.save_system_prompt_snapshot("chat_session_f", "BODY", self._META)
+        path = os.path.join(sm.session_dir, "chat_session_f.sysprompt.json")
+        assert os.path.isfile(path)
+
+        sm.delete_system_prompt_snapshot("chat_session_f")
+        assert not os.path.isfile(path)
+        # Second delete on an absent file must not raise.
+        sm.delete_system_prompt_snapshot("chat_session_f")
+
+    def test_delete_session_also_drops_snapshot(self, sm):
+        """delete_session removes the system-prompt snapshot alongside the db."""
+        session_id = "chat_session_g"
+        sm.get_session(session_id)
+        sm.save_system_prompt_snapshot(session_id, "BODY", self._META)
+        snap_path = os.path.join(sm.session_dir, f"{session_id}.sysprompt.json")
+        assert os.path.isfile(snap_path)
+
+        sm.delete_session(session_id)
+        assert not os.path.isfile(snap_path)
+
+    def test_snapshot_invalid_session_id_raises(self, sm):
+        """Snapshot paths go through session-id validation."""
+        with pytest.raises(ValueError, match="Invalid session ID"):
+            sm.save_system_prompt_snapshot("bad id!", "BODY", self._META)

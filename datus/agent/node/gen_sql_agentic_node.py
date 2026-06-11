@@ -599,6 +599,13 @@ class GenSQLAgenticNode(AgenticNode):
 
         return {getattr(tool, "name", "") for tool in cached_tools if getattr(tool, "name", "")}
 
+    def _runtime_context_current_date(self) -> str:
+        """Honor the node's ``reference_date`` (benchmark/replay) for the date block."""
+        from datus.utils.time_utils import get_default_current_date
+
+        ref = self.date_parsing_tools.reference_date if self.date_parsing_tools else None
+        return get_default_current_date(ref)
+
     def _get_system_prompt(
         self,
         prompt_version: Optional[str] = None,
@@ -643,10 +650,9 @@ class GenSQLAgenticNode(AgenticNode):
                 "execute_reference_template",
             )
         )
-        from datus.utils.time_utils import get_default_current_date
-
-        ref = self.date_parsing_tools.reference_date if self.date_parsing_tools else None
-        context["current_date"] = get_default_current_date(ref)
+        # current_date is rendered by the shared runtime_context partial via
+        # ``_runtime_context_current_date`` (overridden below to honor
+        # ``reference_date``), so it no longer goes through ``context`` here.
         prompt_version = prompt_version or self.node_config.get("prompt_version")
         system_prompt_name = self.node_config.get("system_prompt") or self.get_node_name()
         template_name = f"{system_prompt_name}_system"
