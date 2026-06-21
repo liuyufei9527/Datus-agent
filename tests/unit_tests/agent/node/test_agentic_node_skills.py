@@ -187,8 +187,11 @@ class TestFinalizeSystemPrompt:
         assert result.startswith(base_prompt)
         assert "<available_skills>" in result
         assert "sql-analysis" in result
-        assert "skill-owned scripts" in result
-        assert "native tool directly" in result
+        # The appended XML carries the load_skill trigger and anti-hallucination
+        # HARD RULES; skill_execute_command / native-tool guidance now lives only
+        # in the tool docstrings, not duplicated into the system prompt.
+        assert 'load_skill(skill_name="<skill_name>")' in result
+        assert "EXHAUSTIVE" in result
 
     def test_with_skill_func_tool_empty_xml_appends_explicit_none_block(
         self, mock_agent_config, skill_manager, monkeypatch

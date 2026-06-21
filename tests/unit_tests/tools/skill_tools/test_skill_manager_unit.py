@@ -258,8 +258,11 @@ class TestGenerateSkillsXml:
         xml = manager.generate_available_skills_xml("node")
         assert "<available_skills>" in xml
         assert "test-skill" in xml
-        assert "skill-owned scripts" in xml
-        assert "native tool directly" in xml
+        # XML carries the load_skill trigger and the anti-hallucination HARD RULES.
+        # skill_execute_command / native-tool guidance now lives solely in the
+        # tool docstrings (authoritative tool doc), not duplicated here.
+        assert 'load_skill(skill_name="<skill_name>")' in xml
+        assert "EXHAUSTIVE" in xml
 
     def test_generate_xml_empty_is_explicit(self):
         """With no visible skills, the XML must still be emitted and state the
