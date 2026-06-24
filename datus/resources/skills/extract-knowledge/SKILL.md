@@ -47,11 +47,12 @@ Once the input is resolved, decide which mode to run before entering the workflo
 - **lite (default)** — do not call the `gen_sql` subagent. The main agent itself simulates "given this question + the current datasource schema, how would I draft the SQL," diffs that mental draft against `gold_sql`, and mines the gap directly. **Pros:** fast, zero subagent calls, single-pass. **Cons:** no independent blind-generator validation; depends on the main agent's discipline to "pretend not to know the answer."
 - **deep** — full pipeline. Drive the `gen_sql` subagent through multi-round blind iteration (≤5 rounds) until result match, then mine facts from the final diff. **Pros:** independent blind validator, iteration surfaces finer-grained boundary facts. **Cons:** consumes subagent tokens, requires multiple `read_query` executions.
 
-**Decision rule:**
-1. When the `ask_user` tool is available, call it once and ask the user to choose lite or deep; include the one-line tradeoff. Default suggestion = lite.
-2. When `ask_user` is unavailable (no such tool, or running non-interactively), **default to lite** and note in the final output: "defaulted to lite; rerun and choose deep for stricter validation."
+**Decision rule (first match wins):**
+1. **Caller-specified mode takes precedence.** When the invocation directive / calling skill explicitly names a mode — e.g. the prompt says "deep mode", "lite mode", "mode=deep", "mode=lite", or "(do NOT trigger the deep blind-SQL flow)" — use exactly that mode. Do **not** call `ask_user` and do **not** fall back to the default. This is how `/build-kb` pins **deep** (independent blind-generator validation so a main-agent schema-exploration hunch never leaks into a "fact") and `/init` pins **lite** (fast, file-based, no subagent) for non-interactive runs.
+2. Otherwise, when the `ask_user` tool is available, call it once and ask the user to choose lite or deep; include the one-line tradeoff. Default suggestion = lite.
+3. Otherwise (`ask_user` unavailable — no such tool, or running non-interactively), **default to lite** and note in the final output: "defaulted to lite; rerun and choose deep for stricter validation."
 
-Record the chosen `mode` and route to the right workflow branch.
+Record the chosen `mode` (and, when rule 1 applied, that it was caller-pinned) and route to the right workflow branch.
 
 ## Workflow (one pair at a time)
 
